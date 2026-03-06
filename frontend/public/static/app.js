@@ -7,6 +7,7 @@
     signalsValue: document.getElementById("signalsValue"),
     opportunitiesGrid: document.getElementById("opportunitiesGrid"),
     newsFeed: document.getElementById("newsFeed"),
+    countdownList: document.getElementById("countdownList"),
     errorBanner: document.getElementById("errorBanner"),
     syncStatusText: document.getElementById("syncStatusText"),
   };
@@ -113,18 +114,18 @@
             ? [
                 '<div class="data-viz">',
                 '<div class="viz-item">',
-                '<div class="label">PEB 融合概率</div>',
+                '<div class="label">Blended probability</div>',
                 `<div class="value">${pebProb}</div>`,
                 "</div>",
                 '<div class="viz-divider"></div>',
                 '<div class="viz-item">',
-                '<div class="label">市场定价概率</div>',
+                '<div class="label">Primary market</div>',
                 `<div class="value market">${marketPrice}</div>`,
                 "</div>",
                 "</div>",
                 `<div class="arbitrage-pill ${highlightClass}">`,
                 `<span class="material-icons-round" style="font-size:1.2rem;">${directionIcon}</span>`,
-                `PEB 偏离信号: <span style="font-weight:800;">${divergenceText}</span>`,
+                `Market spread: <span style="font-weight:800;">${divergenceText}</span>`,
                 "</div>",
               ].join("")
             : '<div class="market-loading">正在获取市场报价...</div>',
@@ -169,6 +170,31 @@
       .join("");
   }
 
+  function renderCountdown(countdownItems) {
+    if (!Array.isArray(countdownItems) || countdownItems.length === 0) {
+      elements.countdownList.innerHTML = [
+        '<div class="countdown-row">',
+        "<span>No dated election markets available</span>",
+        '<span class="countdown-value">--</span>',
+        "</div>",
+      ].join("");
+      return;
+    }
+
+    elements.countdownList.innerHTML = countdownItems
+      .map((item) => {
+        const title = escapeHtml(item?.title || "Untitled market");
+        const label = escapeHtml(item?.label || "--");
+        return [
+          '<div class="countdown-row">',
+          `<span>${title}</span>`,
+          `<span class="countdown-value">${label}</span>`,
+          "</div>",
+        ].join("");
+      })
+      .join("");
+  }
+
   async function loadDashboard() {
     try {
       const response = await fetch(dashboardUrl, {
@@ -183,15 +209,18 @@
       const opportunities = payload?.data?.opportunities || [];
       const intelligence = payload?.data?.intelligence || [];
       const stats = payload?.data?.stats || {};
+      const countdown = payload?.data?.countdown || [];
 
       clearError();
       renderStats(stats, opportunities);
       renderOpportunities(opportunities);
       renderNews(intelligence);
+      renderCountdown(countdown);
     } catch (error) {
       renderStats({}, []);
       renderOpportunities([]);
       renderNews([]);
+      renderCountdown([]);
       setError(`仪表盘数据加载失败: ${String(error)}`);
       console.error(error);
     }
