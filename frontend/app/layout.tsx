@@ -5,6 +5,8 @@ import { Inter, Geist } from "next/font/google";
 import "./globals.css";
 import { cn } from "@/lib/utils";
 
+import { ThemeProvider } from "@/components/theme-provider";
+
 const geist = Geist({ subsets: ["latin"], variable: "--font-sans" });
 
 const inter = Inter({
@@ -27,10 +29,17 @@ export default function RootLayout({
       suppressHydrationWarning
       className={cn("font-sans", geist.variable)}
     >
-      <head></head>
-      <body className={`dark ${inter.className}`}>
-        {children}
-        <Analytics />
+      <head />
+      <body className={inter.className}>
+        <ThemeProvider
+          attribute="class"
+          defaultTheme="system"
+          enableSystem
+          disableTransitionOnChange
+        >
+          {children}
+          <Analytics />
+        </ThemeProvider>
       </body>
     </html>
   );

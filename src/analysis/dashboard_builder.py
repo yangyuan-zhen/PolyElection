@@ -33,7 +33,7 @@ PLACE_TRANSLATIONS = {
     "Hungary": "匈牙利",
     "Colombia": "哥伦比亚",
     "Brazil": "巴西",
-    "Texas": "得州",
+    "Texas": "德州",
     "Maine": "缅因州",
     "Nepal": "尼泊尔",
     "Slovenia": "斯洛文尼亚",
@@ -520,6 +520,47 @@ def _build_candidate_board(
     return ordered[:8]
 
 
+def _select_focus_selection(
+    selections: List[Dict[str, Any]],
+    candidate_board: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    if not selections:
+        raise ValueError("selections must not be empty")
+
+    default_primary = max(
+        selections,
+        key=lambda item: (
+            item["volume"],
+            item["liquidity"],
+            item["price"],
+        ),
+    )
+    if not candidate_board:
+        return default_primary
+
+    leader_name = str((candidate_board[0] or {}).get("name") or "").strip().lower()
+    if not leader_name:
+        return default_primary
+
+    for selection in selections:
+        market = selection.get("market") or {}
+        outcomes = selection.get("outcomes") or []
+        normalized_outcomes = {item["label"].strip().lower() for item in outcomes}
+        if normalized_outcomes != {"yes", "no"}:
+            continue
+        contender = _extract_binary_market_contender_label(market).strip().lower()
+        if contender and contender == leader_name:
+            return selection
+
+    for selection in selections:
+        outcomes = selection.get("outcomes") or []
+        top_label = str(selection.get("label") or "").strip().lower()
+        if top_label == leader_name and len(outcomes) > 2:
+            return selection
+
+    return default_primary
+
+
 def _iter_market_selections(markets: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
     selections: List[Dict[str, Any]] = []
     for market in markets:
@@ -534,8 +575,7 @@ def _build_opportunity(event: Dict[str, Any], now: datetime) -> Optional[Dict[st
     selections = _iter_market_selections(markets)
     if not selections:
         return None
-
-    primary = max(
+    default_primary = max(
         selections,
         key=lambda item: (
             item["volume"],
@@ -543,10 +583,6 @@ def _build_opportunity(event: Dict[str, Any], now: datetime) -> Optional[Dict[st
             item["price"],
         ),
     )
-
-    blended_probability = sum(item["price"] for item in selections) / len(selections)
-    market_probability = primary["price"]
-    divergence = blended_probability - market_probability
 
     event_end = _parse_datetime(event.get("endDate") or event.get("end_date"))
     volume_24h = _coerce_float(
@@ -557,11 +593,24 @@ def _build_opportunity(event: Dict[str, Any], now: datetime) -> Optional[Dict[st
     slug = event.get("slug") or ""
 
     title_zh = _normalize_title(title)
+    candidate_board = _build_candidate_board(markets, default_primary.get("market"), title)
+    primary = _select_focus_selection(selections, candidate_board)
+
+    blended_probability = sum(item["price"] for item in selections) / len(selections)
+    market_probability = primary["price"]
+    divergence = blended_probability - market_probability
+    comparison_candidate = ""
+    primary_outcomes = primary.get("outcomes") or []
+    primary_market = primary.get("market") or {}
+    if {item["label"].strip().lower() for item in primary_outcomes} == {"yes", "no"}:
+        comparison_candidate = _extract_binary_market_contender_label(primary_market)
+    elif candidate_board:
+        comparison_candidate = str((candidate_board[0] or {}).get("name") or "")
+
     outcome_label_zh = primary["label_zh"]
     market_question = primary["question"]
     market_question_zh = _normalize_question(market_question, title_zh, outcome_label_zh)
     description_zh = _build_description(title_zh, market_question_zh, event_end)
-    candidate_board = _build_candidate_board(markets, primary.get("market"), title)
 
     return {
         "id": str(event.get("id") or slug or title),
@@ -576,12 +625,17 @@ def _build_opportunity(event: Dict[str, Any], now: datetime) -> Optional[Dict[st
         "market_question": market_question,
         "market_question_zh": market_question_zh,
         "peb_prob": round(blended_probability * 100, 1),
+        "market_blend_prob": round(blended_probability * 100, 1),
         "market_price": round(market_probability * 100, 1),
         "divergence": round(divergence * 100, 1),
+        "peb_source": "market-blend",
+        "poll_breakdown": [],
+        "poll_source_count": 0,
         "has_markets": True,
         "market_count": len(selections),
         "candidate_board": candidate_board,
         "candidate_count": len(candidate_board),
+        "comparison_candidate": comparison_candidate,
         "volume_24h": round(volume_24h, 2),
         "volume_24h_label": _format_currency(volume_24h),
         "liquidity": round(liquidity, 2),
@@ -692,18 +746,34 @@ def build_dashboard_payload(events: List[Dict[str, Any]]) -> Dict[str, Any]:
         reverse=True,
     )
 
-    total_markets = sum(item["market_count"] for item in opportunities)
-    stats = {
-        "active_elections": len(opportunities),
-        "poll_sources": total_markets,
-        "arbitrage_signals": sum(1 for item in opportunities if abs(item["divergence"]) >= 3.0),
-        "last_updated": now.isoformat(),
-    }
-
+    sections = build_dashboard_sections(opportunities, now=now)
     return {
         "opportunities": opportunities,
-        "intelligence": _build_intelligence(opportunities, now),
-        "stats": stats,
-        "countdown": _build_countdown(opportunities, now),
+        **sections,
         "source": "polymarket-gamma-api",
+    }
+
+
+def build_dashboard_sections(
+    opportunities: List[Dict[str, Any]],
+    *,
+    now: Optional[datetime] = None,
+) -> Dict[str, Any]:
+    current = now or datetime.now(timezone.utc)
+    pollster_names = {
+        item.get("name")
+        for opportunity in opportunities
+        for item in (opportunity.get("poll_breakdown") or [])
+        if isinstance(item, dict) and item.get("name")
+    }
+    stats = {
+        "active_elections": len(opportunities),
+        "poll_sources": len(pollster_names),
+        "arbitrage_signals": sum(1 for item in opportunities if abs(item["divergence"]) >= 3.0),
+        "last_updated": current.isoformat(),
+    }
+    return {
+        "intelligence": _build_intelligence(opportunities, current),
+        "stats": stats,
+        "countdown": _build_countdown(opportunities, current),
     }

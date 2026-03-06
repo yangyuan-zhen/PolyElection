@@ -51,6 +51,7 @@ import {
 } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
+import { ModeToggle } from "@/components/mode-toggle";
 
 type CandidateBoardEntry = {
   name?: string;
@@ -72,7 +73,9 @@ type Opportunity = {
   market_question?: string;
   market_question_zh?: string;
   peb_prob?: number;
+  market_blend_prob?: number;
   market_price?: number;
+  kalshi_prob?: number;
   divergence?: number;
   volume_24h?: number;
   volume_24h_label?: string;
@@ -82,8 +85,28 @@ type Opportunity = {
   time_label?: string;
   time_label_zh?: string;
   days_left?: number;
+  peb_source?: string;
+  poll_source?: string;
+  poll_page_title?: string;
+  poll_source_count?: number;
+  poll_accuracy_avg?: number;
+  poll_breakdown?: Array<{
+    name?: string;
+    support?: number;
+    sample?: number;
+    accuracy?: number;
+    weight?: number;
+    date?: string;
+    candidate?: string;
+  }>;
   candidate_board?: CandidateBoardEntry[];
   candidate_count?: number;
+  poll_candidate?: string;
+  kalshi_market_title?: string;
+  kalshi_market_ticker?: string;
+  kalshi_event_title?: string;
+  kalshi_event_ticker?: string;
+  kalshi_match_score?: number;
 };
 
 type IntelligenceItem = {
@@ -120,6 +143,7 @@ type DashboardResponse = {
 
 type Candidate = {
   name: string;
+  nameZh?: string;
   probability: number;
   partyLabel: string;
   image: string;
@@ -171,6 +195,7 @@ type QuantDetail = {
     support: number;
     accuracy: number;
     sample: number;
+    supportFor?: string;
   }>;
   reasoning: {
     sentiment: number;
@@ -183,6 +208,17 @@ type QuantDetail = {
     }>;
   };
   candidateInsights: CandidateInsights;
+  pebSource: string;
+  pollSource: string;
+  pollPageTitle: string;
+  pollSourceCount: number;
+  pollAccuracyAvg: number;
+  pollCandidate: string;
+  kalshiMarketTitle: string;
+  kalshiMarketTicker: string;
+  kalshiEventTitle: string;
+  kalshiEventTicker: string;
+  kalshiMatchScore: number;
 };
 
 const DASHBOARD_URL = "/api/dashboard";
@@ -301,7 +337,7 @@ function extractRegion(title: string): string {
     "哥伦比亚",
     "匈牙利",
     "巴西",
-    "得州",
+    "德州",
     "缅因州",
     "日本",
     "台湾",
@@ -359,8 +395,9 @@ function getCandidateBoard(event: Opportunity): Candidate[] {
     event.candidate_board.length > 0
   ) {
     return event.candidate_board.map((item) => ({
-      name: item.name_zh || item.name || "未知候选人",
-      probability: toNumber(item.probability),
+      name: String(item.name || item.name_zh || "未知候选人"),
+      nameZh: String(item.name_zh || ""),
+      probability: toNumber(item.probability, 5.0),
       partyLabel: item.party_label || "",
       image: item.image || "",
     }));
@@ -373,6 +410,7 @@ function getCandidateBoard(event: Opportunity): Candidate[] {
   return [
     {
       name: safeOutcome(event),
+      nameZh: event.outcome_label_zh || "",
       probability: clamp(toNumber(event.market_price, 50), 1, 99),
       partyLabel:
         event.candidate_count && event.candidate_count > 1 ? "候选盘" : "",
@@ -387,6 +425,7 @@ function getCandidateInsights(event: Opportunity): CandidateInsights {
     .slice(0, 8);
   const leader = candidates[0] || {
     name: safeOutcome(event),
+    nameZh: event.outcome_label_zh || "",
     probability: toNumber(event.market_price),
     partyLabel: "",
     image: "",
@@ -597,22 +636,17 @@ function buildPollBreakdown(
   event: Opportunity,
   detail: Pick<QuantDetail, "pebProb">,
 ) {
-  const random = createSeededRandom(`polls:${event.id}`);
-  const base = detail.pebProb;
-  const pollsters = POLLSTERS.map((name, index) => ({
-    name,
-    weight: clamp(0.14 + random() * 0.22, 0.08, 0.34),
-    support: clamp(base + (random() - 0.5) * 10 + index * 0.4, 1, 99),
-    accuracy: clamp(71 + random() * 20, 60, 95),
-    sample: Math.round(850 + random() * 2200),
-  })).sort((left, right) => right.weight - left.weight);
-
-  const totalWeight =
-    pollsters.reduce((sum, item) => sum + item.weight, 0) || 1;
-  return pollsters.map((item) => ({
-    ...item,
-    weight: item.weight / totalWeight,
-  }));
+  if (Array.isArray(event.poll_breakdown) && event.poll_breakdown.length > 0) {
+    return event.poll_breakdown.map((poll) => ({
+      name: poll.name || "Unknown",
+      weight: clamp(toNumber(poll.weight, 0.2), 0.01, 1),
+      support: clamp(toNumber(poll.support, detail.pebProb), 0, 100),
+      accuracy: clamp(toNumber(poll.accuracy, 74), 0, 100),
+      sample: Math.round(toNumber(poll.sample, 1000)),
+      supportFor: poll.candidate || "",
+    }));
+  }
+  return [];
 }
 
 function buildCatalysts(event: Opportunity) {
@@ -712,7 +746,9 @@ function buildQuantDetail(event: Opportunity): QuantDetail {
   const spread = pebProb - marketProb;
   const random = createSeededRandom(`detail:${event.id}`);
   const kalshiProb = clamp(
-    marketProb - spread * 0.35 + (random() - 0.5) * 4,
+    Number.isFinite(Number(event.kalshi_prob))
+      ? Number(event.kalshi_prob)
+      : marketProb - spread * 0.35 + (random() - 0.5) * 4,
     1,
     99,
   );
@@ -742,6 +778,17 @@ function buildQuantDetail(event: Opportunity): QuantDetail {
       series,
     }),
     candidateInsights,
+    pebSource: event.peb_source || "market-blend",
+    pollSource: event.poll_source || "No poll source",
+    pollPageTitle: event.poll_page_title || "",
+    pollSourceCount: toNumber(event.poll_source_count, 0),
+    pollAccuracyAvg: toNumber(event.poll_accuracy_avg, 0),
+    pollCandidate: String(event.poll_candidate || ""),
+    kalshiMarketTitle: String(event.kalshi_market_title || ""),
+    kalshiMarketTicker: String(event.kalshi_market_ticker || ""),
+    kalshiEventTitle: String(event.kalshi_event_title || ""),
+    kalshiEventTicker: String(event.kalshi_event_ticker || ""),
+    kalshiMatchScore: toNumber(event.kalshi_match_score, 0),
   };
 }
 
@@ -777,22 +824,27 @@ function CandidateAvatar({
 }) {
   const [startColor, endColor] = colorFromText(candidate.name);
   return (
-    <div className={`candidate-avatar${small ? " small" : ""}`}>
+    <div
+      className={cn(
+        "relative flex shrink-0 overflow-hidden rounded-full border border-primary/10 shadow-sm",
+        small ? "size-8" : "size-12",
+      )}
+    >
       {candidate.image ? (
         <img
-          className="candidate-avatar-image"
+          className="aspect-square h-full w-full object-cover"
           src={candidate.image}
           alt={candidate.name}
         />
       ) : (
-        <span
-          className="candidate-avatar-fallback"
+        <div
+          className="flex h-full w-full items-center justify-center text-xs font-black text-white"
           style={{
             background: `linear-gradient(135deg, ${startColor}, ${endColor})`,
           }}
         >
           {initialsFromName(candidate.name)}
-        </span>
+        </div>
       )}
     </div>
   );
@@ -852,10 +904,14 @@ function HybridChart({ detail }: { detail: QuantDetail }) {
                 y1={y}
                 x2={width}
                 y2={y}
-                stroke="rgba(255,255,255,0.08)"
+                className="stroke-muted-foreground/10"
                 strokeWidth="1"
               />
-              <text x="0" y={y - 6} fill="rgba(216,228,244,0.56)" fontSize="11">
+              <text
+                x="0"
+                y={y - 6}
+                className="fill-muted-foreground text-xs font-bold uppercase tracking-wider"
+              >
                 {line}%
               </text>
             </Fragment>
@@ -929,9 +985,94 @@ function HybridChart({ detail }: { detail: QuantDetail }) {
           d={pebPath}
           fill="none"
           stroke="#39d0ff"
-          strokeWidth="2"
+          strokeWidth="2.5"
           filter="url(#glow)"
         />
+
+        {/* Current Price Labels (Staggered Collision Avoidance) */}
+        {(() => {
+          const labelConfigs = [
+            {
+              val: candles[candles.length - 1].close,
+              color: "#00ff9d",
+              label: "MKT",
+            },
+            {
+              val: detail.series.kalshiLine[
+                detail.series.kalshiLine.length - 1
+              ],
+              color: "#6f92ff",
+              label: "KLSH",
+            },
+            {
+              val: detail.series.pebLine[detail.series.pebLine.length - 1],
+              color: "#39d0ff",
+              label: "PEB",
+            },
+          ].map((p) => ({
+            ...p,
+            y: chartHeight - (p.val / 100) * chartHeight,
+          }));
+
+          // Simple layout algorithm to prevent overlap
+          const sorted = [...labelConfigs].sort((a, b) => a.y - b.y);
+          const minGap = 26; // Height of label + small margin
+          for (let i = 1; i < sorted.length; i++) {
+            if (sorted[i].y - sorted[i - 1].y < minGap) {
+              sorted[i].y = sorted[i - 1].y + minGap;
+            }
+          }
+          // Shift back if bottom label goes off-chart
+          const bottomLimit = chartHeight - 12;
+          if (sorted[2].y > bottomLimit) {
+            const offset = sorted[2].y - bottomLimit;
+            sorted.forEach((p) => (p.y -= offset));
+          }
+
+          return sorted.map((line, idx) => {
+            const originalY = chartHeight - (line.val / 100) * chartHeight;
+            return (
+              <g key={`${line.label}-${idx}`}>
+                {/* Connector line from label to actual price point */}
+                <path
+                  d={`M ${width - 45} ${line.y} C ${width - 55} ${line.y}, ${width - 65} ${originalY}, ${width - 80} ${originalY}`}
+                  stroke={line.color}
+                  strokeWidth="1"
+                  strokeDasharray="2 2"
+                  fill="none"
+                  opacity="0.25"
+                />
+
+                <rect
+                  x={width - 50}
+                  y={line.y - 12}
+                  width="50"
+                  height="24"
+                  rx="4"
+                  fill="rgba(0,0,0,0.85)"
+                  className="backdrop-blur-md shadow-xl border border-white/5"
+                />
+                <text
+                  x={width - 5}
+                  y={line.y + 5}
+                  textAnchor="end"
+                  style={{ fill: line.color }}
+                  className="text-[11px] font-black tabular-nums"
+                >
+                  {line.val.toFixed(1)}%
+                </text>
+                <text
+                  x={width - 55}
+                  y={line.y + 5}
+                  textAnchor="end"
+                  className="fill-muted-foreground/60 text-[9px] font-black uppercase tracking-tighter"
+                >
+                  {line.label}
+                </text>
+              </g>
+            );
+          });
+        })()}
 
         {eventMarkers.map((item) => (
           <Fragment key={item.label}>
@@ -940,15 +1081,14 @@ function HybridChart({ detail }: { detail: QuantDetail }) {
               y1="12"
               x2={item.x}
               y2={chartHeight}
-              stroke="rgba(0,255,157,0.24)"
+              className="stroke-primary/20"
               strokeDasharray="4 6"
             />
-            <circle cx={item.x} cy="24" r="4.5" fill="#00ff9d" />
+            <circle cx={item.x} cy="24" r="4.5" className="fill-primary" />
             <text
               x={item.x + 8}
-              y="20"
-              fill="rgba(230,237,243,0.88)"
-              fontSize="11"
+              y="28"
+              className="fill-muted-foreground text-[8px] font-black uppercase"
             >
               {item.label} {item.title}
             </text>
@@ -965,8 +1105,7 @@ function HybridChart({ detail }: { detail: QuantDetail }) {
               x={index * step + step / 2}
               y={height - 4}
               textAnchor="middle"
-              fill="rgba(216,228,244,0.56)"
-              fontSize="11"
+              className="fill-muted-foreground/60 text-[11px] font-bold"
             >
               {label}
             </text>
@@ -1142,49 +1281,123 @@ export default function DashboardClient() {
             <button
               key={item.id}
               className={cn(
-                "group flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+                "group flex w-full items-center gap-3 rounded-xl px-4 py-2.5 text-sm font-bold transition-all duration-200",
                 item.active
-                  ? "bg-primary/10 text-primary shadow-sm ring-1 ring-primary/20"
-                  : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                  ? "bg-primary text-primary-foreground shadow-[0_8px_16px_-6px_rgba(var(--primary),0.3)]"
+                  : "text-muted-foreground hover:bg-muted/80 hover:text-foreground",
               )}
               type="button"
             >
               <item.icon
                 className={cn(
-                  "size-4",
+                  "size-4.5 transition-transform group-hover:scale-110",
                   item.active
-                    ? "text-primary"
-                    : "text-muted-foreground group-hover:text-foreground",
+                    ? "text-primary-foreground"
+                    : "text-muted-foreground group-hover:text-primary",
                 )}
               />
               {item.label}
               {item.id === "notifications_active" && (
-                <span className="ml-auto inline-flex size-2 rounded-full bg-primary" />
+                <span className="ml-auto flex items-center gap-1.5">
+                  <span className="inline-flex size-2 rounded-full bg-primary animate-pulse" />
+                  <span className="text-[10px] font-black opacity-60">
+                    LIVE
+                  </span>
+                </span>
               )}
             </button>
           ))}
-        </nav>
 
-        <div className="mt-auto border-t bg-muted/30 p-4">
-          <div className="flex items-center gap-3 px-2">
-            <div className="flex size-8 items-center justify-center rounded-full bg-primary/20 text-primary ring-1 ring-primary/20">
-              <User className="size-4" />
+          <div className="mt-8 px-4">
+            <div className="text-[11px] font-black text-muted-foreground uppercase tracking-[0.2em] mb-4 opacity-50">
+              System Connectivity
             </div>
-            <div className="flex flex-col">
-              <span className="text-xs font-bold text-foreground">用户 N</span>
-              <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                免费版 Pro
-              </span>
+            <div className="space-y-3">
+              {[
+                { label: "Polymarket API", status: "online", latency: "142ms" },
+                {
+                  label: "Wikipedia Scraper",
+                  status: "active",
+                  latency: "2.4s",
+                },
+                {
+                  label: "PEB Hybrid Engine",
+                  status: "synced",
+                  latency: "stable",
+                },
+              ].map((sys) => (
+                <div
+                  key={sys.label}
+                  className="flex items-center justify-between group"
+                >
+                  <div className="flex items-center gap-2">
+                    <div
+                      className={cn(
+                        "size-1.5 rounded-full",
+                        sys.status === "online" ||
+                          sys.status === "active" ||
+                          sys.status === "synced"
+                          ? "bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]"
+                          : "bg-amber-500",
+                      )}
+                    />
+                    <span className="text-[11px] font-bold text-muted-foreground group-hover:text-foreground transition-colors uppercase tracking-tight">
+                      {sys.label}
+                    </span>
+                  </div>
+                  <span className="text-[10px] font-black tabular-nums opacity-40 group-hover:opacity-100 transition-opacity uppercase">
+                    {sys.latency}
+                  </span>
+                </div>
+              ))}
             </div>
           </div>
-          <Button
-            className="mt-4 w-full justify-start text-xs font-bold"
-            variant="outline"
-            size="sm"
-          >
-            <Zap className="mr-2 size-3 text-primary fill-primary" />
-            升级专业版
-          </Button>
+        </nav>
+
+        <div className="mt-auto p-4 border-t bg-gradient-to-t from-muted/50 to-transparent">
+          <div className="relative p-4 rounded-2xl bg-card border border-primary/10 shadow-lg overflow-hidden group">
+            <div className="absolute -top-12 -right-12 size-32 bg-primary/5 rounded-full blur-3xl group-hover:bg-primary/10 transition-colors" />
+            <div className="flex items-center gap-3 relative">
+              <div className="size-10 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary shadow-inner">
+                <User className="size-5" />
+              </div>
+              <div className="flex flex-col">
+                <span className="text-xs font-black text-foreground uppercase tracking-tight">
+                  Quant User #882
+                </span>
+                <div className="flex items-center gap-1.5 mt-0.5">
+                  <Badge
+                    variant="outline"
+                    className="h-4 text-[9px] font-black uppercase px-1 border-primary/20 text-primary"
+                  >
+                    Free
+                  </Badge>
+                  <span className="text-[10px] font-bold text-muted-foreground uppercase opacity-60">
+                    Pro v1.2
+                  </span>
+                </div>
+              </div>
+            </div>
+            <div className="mt-4 space-y-2 relative">
+              <div className="flex items-center justify-between text-[10px] font-black uppercase tracking-widest text-muted-foreground opacity-60">
+                <span>Free Tier Limit</span>
+                <span>2/50 Calls</span>
+              </div>
+              <div className="h-1.5 w-full bg-muted rounded-full overflow-hidden">
+                <div className="h-full bg-primary/40 w-[4%]" />
+              </div>
+            </div>
+            <Button
+              className="mt-4 w-full justify-between px-4 text-xs font-black uppercase tracking-widest h-9 bg-primary text-primary-foreground hover:shadow-lg hover:shadow-primary/20 transition-all border-none"
+              size="sm"
+            >
+              <span className="flex items-center gap-2">
+                <Zap className="size-3 fill-current" />
+                Upgrade Now
+              </span>
+              <ChevronRight className="size-3" />
+            </Button>
+          </div>
         </div>
       </aside>
 
@@ -1199,24 +1412,27 @@ export default function DashboardClient() {
             </p>
           </div>
           <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded-full border bg-card/30 backdrop-blur-sm text-[11px] font-bold text-muted-foreground uppercase tracking-widest leading-none">
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded-full border bg-card/30 backdrop-blur-sm text-[13px] font-bold text-muted-foreground uppercase tracking-widest leading-none">
               <span className="flex size-1.5 rounded-full bg-primary animate-pulse" />
               Realtime Synced
             </div>
-            <div className="text-[11px] font-bold text-muted-foreground/60 leading-tight">
+            <div className="text-[13px] font-bold text-muted-foreground/60 leading-tight">
               最后同步
               <br />
               {stats.last_updated && stats.last_updated.includes("T")
                 ? stats.last_updated.split("T")[1].slice(0, 5)
                 : "--:--"}
             </div>
-            <Button
-              variant="outline"
-              size="icon"
-              className="size-9 rounded-full"
-            >
-              <Settings className="size-4" />
-            </Button>
+            <div className="flex items-center gap-2">
+              <ModeToggle />
+              <Button
+                variant="outline"
+                size="icon"
+                className="size-9 rounded-full border border-primary/20 bg-card/40 backdrop-blur-md"
+              >
+                <Settings className="size-4" />
+              </Button>
+            </div>
           </div>
         </header>
 
@@ -1227,54 +1443,79 @@ export default function DashboardClient() {
           </div>
         )}
 
-        <div className="grid grid-cols-3 gap-6 mb-10">
-          <Card className="relative overflow-hidden group hover:ring-2 hover:ring-primary/20 transition-all border-l-4 border-l-primary bg-card/30">
-            <CardHeader className="pb-2">
-              <CardDescription className="text-[10px] font-extrabold uppercase tracking-widest text-primary">
-                活跃对冲市场
-              </CardDescription>
-              <CardTitle className="text-4xl font-black">
-                {stats.active_elections || 0}
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-xs text-muted-foreground font-medium">
-                包含美国大选、初选及全球 14 个核心选定点。
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
+          {[
+            {
+              label: "Active Markets",
+              value: stats.active_elections,
+              sub: "High Liquidity",
+              color: "primary",
+              icon: Globe,
+              trend: "+12%",
+            },
+            {
+              label: "Data Sources",
+              value: stats.poll_sources,
+              sub: "Verified Feeds",
+              color: "secondary",
+              icon: Layers,
+              trend: "Stable",
+            },
+            {
+              label: "Alpha Signals",
+              value: stats.arbitrage_signals,
+              sub: "Divergence > 5%",
+              color: "amber-500",
+              icon: Zap,
+              trend: "4 Active",
+            },
+          ].map((card) => (
+            <Card
+              key={card.label}
+              className={cn(
+                "relative overflow-hidden group transition-all duration-300 border-none bg-card/40 backdrop-blur-md shadow-lg hover:shadow-2xl hover:-translate-y-1 ring-1 ring-primary/5",
+                `after:absolute after:inset-y-0 after:left-0 after:w-1 after:bg-${card.color}`,
+              )}
+            >
+              <div className="absolute -top-6 -right-6 p-4 opacity-[0.03] group-hover:opacity-[0.07] transition-all duration-500 group-hover:scale-110 group-hover:-rotate-12">
+                <card.icon className="size-24" />
               </div>
-            </CardContent>
-          </Card>
-
-          <Card className="relative overflow-hidden group hover:ring-2 hover:ring-secondary/20 transition-all border-l-4 border-l-secondary bg-card/30">
-            <CardHeader className="pb-2">
-              <CardDescription className="text-[10px] font-extrabold uppercase tracking-widest text-secondary">
-                独立数据源
-              </CardDescription>
-              <CardTitle className="text-4xl font-black">
-                {stats.poll_sources || 0}
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-xs text-muted-foreground font-medium">
-                聚合 Polymarket、Kalshi、YouGov 及 PEB 全球民调精选。
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="relative overflow-hidden group hover:ring-2 hover:ring-amber-500/20 transition-all border-l-4 border-l-amber-500 bg-card/30">
-            <CardHeader className="pb-2">
-              <CardDescription className="text-[10px] font-extrabold uppercase tracking-widest text-amber-500">
-                高分歧交易对
-              </CardDescription>
-              <CardTitle className="text-4xl font-black text-amber-500">
-                {stats.arbitrage_signals || 0}
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-xs text-muted-foreground font-medium">
-                当前模型偏离阈值超过 5% 的高度可对冲点数。
-              </div>
-            </CardContent>
-          </Card>
+              <CardHeader className="pb-2">
+                <div className="flex items-center justify-between mb-1">
+                  <CardDescription
+                    className={cn(
+                      "text-[11px] font-black uppercase tracking-[0.2em]",
+                      `text-${card.color}`,
+                    )}
+                  >
+                    {card.label}
+                  </CardDescription>
+                  <Badge
+                    variant="outline"
+                    className="h-4 text-[9px] font-black uppercase bg-muted/50 border-none opacity-60"
+                  >
+                    {card.trend}
+                  </Badge>
+                </div>
+                <CardTitle className="text-4xl font-black tracking-tighter tabular-nums">
+                  {card.value || 0}
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="flex items-center gap-2">
+                  <div className="h-1 w-12 bg-muted rounded-full overflow-hidden shrink-0">
+                    <div
+                      className={cn("h-full animate-pulse", `bg-${card.color}`)}
+                      style={{ width: "60%" }}
+                    />
+                  </div>
+                  <div className="text-[10px] text-muted-foreground/60 font-black uppercase tracking-wider truncate">
+                    {card.sub}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
         </div>
 
         <div className="flex flex-col lg:flex-row gap-8 items-start">
@@ -1303,7 +1544,7 @@ export default function DashboardClient() {
                     }}
                   />
                 </div>
-                <div className="flex items-center gap-2 px-1 py-1 rounded-xl border bg-card/30 backdrop-blur-sm">
+                <div className="flex items-center gap-2 p-1 rounded-2xl border bg-card/40 backdrop-blur-md shadow-inner ring-1 ring-primary/5">
                   {[
                     ["volume", "成交额"],
                     ["spread", "价差"],
@@ -1312,10 +1553,10 @@ export default function DashboardClient() {
                       key={val}
                       onClick={() => setSortMode(val)}
                       className={cn(
-                        "px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all",
+                        "px-4 py-2 rounded-xl text-[12px] font-black uppercase tracking-[0.15em] transition-all",
                         sortMode === val
-                          ? "bg-primary text-primary-foreground shadow-sm"
-                          : "text-muted-foreground hover:text-foreground",
+                          ? "bg-primary text-primary-foreground shadow-[0_4px_12px_rgba(var(--primary),0.25)] scale-[1.02]"
+                          : "text-muted-foreground hover:text-foreground hover:bg-muted/50",
                       )}
                     >
                       {label}
@@ -1337,7 +1578,7 @@ export default function DashboardClient() {
                   variant={activeFilter === value ? "default" : "outline"}
                   size="sm"
                   className={cn(
-                    "h-8 px-5 rounded-full font-black text-[10px] uppercase tracking-widest transition-all",
+                    "h-8 px-5 rounded-full font-black text-xs uppercase tracking-widest transition-all",
                     activeFilter === value
                       ? "shadow-lg shadow-primary/20"
                       : "bg-card/20 hover:bg-muted/80",
@@ -1379,93 +1620,136 @@ export default function DashboardClient() {
                     <Card
                       key={event.id}
                       className={cn(
-                        "group relative overflow-hidden transition-all hover:ring-2 hover:ring-primary/20 bg-card/30 border-primary/5 cursor-pointer",
-                        highlightedId === event.id && "ring-2 ring-primary",
+                        "group relative overflow-hidden transition-all duration-300 hover:ring-2 hover:ring-primary/20 bg-card/40 backdrop-blur-md border-primary/5 cursor-pointer hover:-translate-y-1 hover:shadow-[0_20px_40px_-12px_rgba(0,0,0,0.3)]",
+                        highlightedId === event.id &&
+                          "ring-2 ring-primary bg-primary/[0.02]",
                       )}
                       onClick={() => highlightOpportunity(event)}
                     >
+                      {isHot && (
+                        <div className="absolute -top-24 -right-24 size-48 bg-amber-500/10 rounded-full blur-3xl animate-pulse pointer-events-none" />
+                      )}
+
                       <div
                         className={cn(
-                          "absolute top-0 right-0 px-3 py-1 text-[9px] font-black uppercase tracking-widest rounded-bl-xl z-10",
+                          "absolute top-0 right-0 px-3 py-1 text-[11px] font-black uppercase tracking-widest rounded-bl-xl z-20",
                           isHot
-                            ? "bg-amber-500 text-amber-950 animate-pulse"
-                            : "bg-muted text-muted-foreground",
+                            ? "bg-amber-500 text-amber-950 shadow-[0_4px_12px_rgba(245,158,11,0.3)]"
+                            : "bg-muted/80 backdrop-blur-md text-muted-foreground border-l border-b",
                         )}
                       >
                         {isHot ? "Hot Signal" : `Market #${index + 1}`}
                       </div>
 
-                      <CardHeader className="pb-4">
-                        <CardTitle className="text-lg font-bold leading-tight line-clamp-2 group-hover:text-primary transition-colors">
+                      <CardHeader className="pb-4 relative z-10">
+                        <CardTitle className="text-lg font-black leading-tight line-clamp-2 transition-colors">
                           {safeTitle(event)}
                         </CardTitle>
-                        <CardDescription className="text-xs font-medium line-clamp-2 mt-2 leading-relaxed h-8">
-                          {truncate(buildDeckDescription(event), 88)}
+                        <CardDescription className="text-xs font-bold uppercase tracking-tight text-muted-foreground/60 h-4 mt-2">
+                          {extractRegion(safeTitle(event))} ·{" "}
+                          {extractElectionType(safeTitle(event))}
                         </CardDescription>
                       </CardHeader>
 
-                      <CardContent className="space-y-4">
-                        <div className="flex flex-wrap gap-1.5 h-12 overflow-hidden items-start">
+                      <CardContent className="space-y-5 relative z-10">
+                        <div className="space-y-3">
                           {candidates.map((candidate, ci) => (
-                            <Badge
+                            <div
                               key={ci}
-                              variant="secondary"
-                              className="bg-muted/50 text-[10px] h-5 font-bold"
+                              className="flex items-center justify-between group/cand"
                             >
-                              {ci === 0 ? "领跑" : "次席"}: {candidate.name}{" "}
-                              {formatPercent(candidate.probability)}
-                            </Badge>
+                              <div className="flex items-center gap-2.5">
+                                <CandidateAvatar candidate={candidate} small />
+                                <span className="text-[13px] font-bold truncate max-w-[120px]">
+                                  {candidate.name}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span className="text-[13px] font-black tabular-nums">
+                                  {formatPercent(candidate.probability)}
+                                </span>
+                                <div className="h-1.5 w-16 bg-muted rounded-full overflow-hidden">
+                                  <div
+                                    className={cn(
+                                      "h-full transition-all duration-1000",
+                                      ci === 0
+                                        ? "bg-primary"
+                                        : "bg-muted-foreground/30",
+                                    )}
+                                    style={{
+                                      width: `${candidate.probability}%`,
+                                    }}
+                                  />
+                                </div>
+                              </div>
+                            </div>
                           ))}
                         </div>
 
-                        <div className="grid grid-cols-2 gap-3 py-3 border-y border-primary/5 bg-muted/5 -mx-6 px-6">
+                        <div className="grid grid-cols-2 gap-4 py-4 border-y border-primary/5 bg-muted/10 -mx-6 px-6">
                           <div className="space-y-1">
-                            <div className="text-[9px] font-black text-muted-foreground uppercase tracking-widest">
-                              PEB 融合概率
+                            <div className="text-[10px] font-black text-muted-foreground/60 uppercase tracking-widest">
+                              PEB PROB
                             </div>
-                            <div className="text-xl font-black text-foreground">
+                            <div className="text-2xl font-black tracking-tighter text-foreground">
                               {formatPercent(event.peb_prob)}
                             </div>
                           </div>
                           <div className="space-y-1">
-                            <div className="text-[9px] font-black text-muted-foreground uppercase tracking-widest text-right">
-                              主市场价格
+                            <div className="text-[10px] font-black text-muted-foreground/60 uppercase tracking-widest text-right">
+                              MARKET PRICE
                             </div>
-                            <div className="text-xl font-black text-primary text-right">
+                            <div className="text-2xl font-black tracking-tighter text-primary text-right">
                               {formatPercent(event.market_price)}
                             </div>
                           </div>
                         </div>
 
-                        <div className="flex items-center justify-between pt-2">
-                          <div
-                            className={cn(
-                              "flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest transition-colors shadow-sm",
-                              divergence >= 0
-                                ? "bg-green-500/10 text-green-500 border border-green-500/20"
-                                : "bg-red-500/10 text-red-500 border border-red-500/20",
-                            )}
-                          >
-                            {divergence > 0 ? (
-                              <ArrowUpRight className="size-3" />
-                            ) : (
-                              <ArrowUpRight className="size-3 rotate-90" />
-                            )}
-                            价差: {formatSignedPercent(divergence)}
+                        <div className="flex items-center justify-between pt-1">
+                          <div className="flex flex-col gap-1">
+                            <div className="text-[10px] font-black text-muted-foreground uppercase opacity-40">
+                              Divergence Signal
+                            </div>
+                            <div
+                              className={cn(
+                                "flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-black uppercase tracking-wider transition-colors shadow-sm border",
+                                divergence >= 0
+                                  ? "bg-emerald-500/10 text-emerald-500 border-emerald-500/20"
+                                  : "bg-rose-500/10 text-rose-500 border-rose-500/20",
+                              )}
+                            >
+                              {divergence > 0 ? (
+                                <ArrowUpRight className="size-3" />
+                              ) : (
+                                <ArrowUpRight className="size-3 rotate-90" />
+                              )}
+                              {formatSignedPercent(divergence)}
+                            </div>
                           </div>
 
-                          <div className="flex items-center gap-3 text-[10px] font-bold text-muted-foreground">
-                            <span className="flex items-center gap-1">
-                              <Activity className="size-3" />
+                          <div className="flex flex-col items-end gap-1 text-right">
+                            <div className="text-[10px] font-black text-muted-foreground uppercase opacity-40">
+                              Market Volume
+                            </div>
+                            <span className="flex items-center gap-1.5 text-xs font-black tabular-nums">
+                              <Activity className="size-3 text-primary" />
                               {event.volume_24h_label || "--"}
                             </span>
-                            <span className="flex items-center gap-1">
-                              <Clock className="size-3" />
-                              {event.time_label_zh ||
-                                event.time_label ||
-                                "实时"}
-                            </span>
                           </div>
+                        </div>
+
+                        <div className="h-1 w-full bg-muted/30 rounded-full overflow-hidden mt-2">
+                          <div
+                            className={cn(
+                              "h-full animate-pulse transition-all duration-500",
+                              Math.abs(divergence) >= 5
+                                ? "bg-amber-500"
+                                : "bg-primary/40",
+                            )}
+                            style={{
+                              width: `${Math.min(100, Math.abs(divergence) * 10)}%`,
+                            }}
+                          />
                         </div>
                       </CardContent>
                     </Card>
@@ -1486,7 +1770,7 @@ export default function DashboardClient() {
                     <CardTitle className="text-sm font-black uppercase tracking-widest">
                       选情雷达
                     </CardTitle>
-                    <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-tighter mt-0.5">
+                    <p className="text-xs font-bold text-muted-foreground uppercase tracking-tighter mt-0.5">
                       Intellgence Stream
                     </p>
                   </div>
@@ -1512,18 +1796,19 @@ export default function DashboardClient() {
                           <div className="flex items-center gap-2 mb-2.5">
                             <Badge
                               variant="outline"
-                              className="text-[9px] font-black py-0 h-4 uppercase bg-primary/5 border-primary/20 text-primary"
+                              className="text-[11px] font-black py-0 h-4 uppercase bg-primary/5 border-primary/20 text-primary flex items-center gap-1.5"
                             >
+                              <span className="size-1 rounded-full bg-primary animate-pulse" />
                               {item.tag || "INTEL"}
                             </Badge>
-                            <span className="text-[9px] font-bold text-muted-foreground/60 tabular-nums">
+                            <span className="text-[11px] font-bold text-muted-foreground/60 tabular-nums">
                               {item.time || "实时"}
                             </span>
                           </div>
                           <h4 className="text-sm font-bold leading-tight text-foreground group-hover:text-primary transition-colors mb-2.5">
                             {item.title}
                           </h4>
-                          <div className="flex items-start gap-2 text-[11px] font-bold text-muted-foreground leading-snug">
+                          <div className="flex items-start gap-2 text-[13px] font-bold text-muted-foreground leading-snug">
                             <Info className="size-3.5 mt-0.5 shrink-0 text-primary/40" />
                             {item.impact}
                           </div>
@@ -1545,7 +1830,7 @@ export default function DashboardClient() {
                     <CardTitle className="text-sm font-black uppercase tracking-widest">
                       选举倒计时
                     </CardTitle>
-                    <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-tighter mt-0.5">
+                    <p className="text-xs font-bold text-muted-foreground uppercase tracking-tighter mt-0.5">
                       Event Horizon
                     </p>
                   </div>
@@ -1561,17 +1846,29 @@ export default function DashboardClient() {
                     countdown.map((item, idx) => (
                       <button
                         key={idx}
-                        className="w-full flex items-center justify-between p-5 hover:bg-secondary/[0.03] transition-colors"
+                        className="w-full relative group p-5 hover:bg-muted/50 transition-all border-b last:border-0"
                         onClick={() =>
                           findByTitle(item.title_zh || item.title || "")
                         }
                       >
-                        <span className="text-xs font-bold text-muted-foreground group-hover:text-secondary truncate pr-4">
-                          {item.title_zh || item.title}
-                        </span>
-                        <span className="text-xs font-black text-secondary tabular-nums py-1 px-2 bg-secondary/10 rounded-md ring-1 ring-secondary/20 min-w-16 text-center">
-                          {item.label}
-                        </span>
+                        <div className="flex items-center justify-between mb-3">
+                          <span className="text-sm font-bold text-foreground/80 group-hover:text-foreground transition-colors truncate pr-4">
+                            {item.title_zh || item.title}
+                          </span>
+                          <span className="text-[11px] font-black text-secondary-foreground tabular-nums py-1 px-2.5 bg-secondary rounded-lg shadow-sm min-w-[60px] text-center">
+                            {item.label}
+                          </span>
+                        </div>
+                        <div className="h-2 w-full bg-muted/50 rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-secondary shadow-[0_0_8px_rgba(var(--secondary),0.4)] transition-all duration-700"
+                            style={{
+                              width: item.label?.includes("天")
+                                ? `${Math.max(10, Math.min(100, 100 - (parseInt(item.label) / 60) * 100))}%`
+                                : "100%",
+                            }}
+                          />
+                        </div>
                       </button>
                     ))
                   )}
@@ -1589,23 +1886,24 @@ export default function DashboardClient() {
             if (!open) setSelectedOpportunity(null);
           }}
         >
-          <DialogContent className="max-w-[1400px] w-[95vw] h-[90vh] p-0 overflow-hidden bg-background/95 backdrop-blur-2xl border-primary/20 shadow-[0_0_50px_-12px_rgba(0,0,0,0.5)]">
-            <div className="flex flex-col h-full">
+          <DialogContent className="max-w-[1650px] w-[96vw] h-[90vh] p-0 overflow-hidden bg-background/95 backdrop-blur-2xl border-primary/20 shadow-[0_0_50px_-12px_rgba(0,0,0,0.5)]">
+            <div className="flex flex-col h-full min-h-0">
               <header className="flex items-center justify-between px-8 py-6 border-b bg-muted/30">
                 <div className="space-y-1">
                   <div className="flex items-center gap-2">
-                    <Badge
-                      variant="outline"
-                      className="text-[10px] font-black tracking-widest uppercase bg-primary/5 text-primary border-primary/20"
-                    >
-                      Market War Room
+                    <Badge className="bg-primary/10 text-primary border-primary/20 text-[10px] font-black uppercase tracking-wider h-5">
+                      市场作战室 (War Room)
                     </Badge>
-                    <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-tighter">
+                    <span className="text-[10px] font-bold text-muted-foreground/40 tabular-nums">
                       ID: {selectedOpportunity.id.slice(0, 8)}
                     </span>
                   </div>
-                  <DialogTitle className="text-3xl font-black tracking-tight leading-none">
-                    {safeTitle(selectedOpportunity)}
+                  <DialogTitle className="text-3xl font-black tracking-tight leading-none py-1">
+                    {detail.candidateInsights.leader.nameZh ||
+                      detail.candidateInsights.leader.name}
+                    <span className="text-muted-foreground/40 ml-2 font-medium">
+                      / {selectedOpportunity.title_zh}
+                    </span>
                   </DialogTitle>
                   <DialogDescription className="text-sm font-medium text-muted-foreground flex items-center gap-2">
                     <Globe className="size-3.5" />
@@ -1613,57 +1911,89 @@ export default function DashboardClient() {
                   </DialogDescription>
                 </div>
 
-                <div className="flex items-center gap-3">
-                  <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border bg-card/50 backdrop-blur-sm mr-4">
-                    <Badge
-                      variant="secondary"
-                      className="font-bold text-[10px]"
-                    >
-                      {detail.candidateInsights.structureLabel}
-                    </Badge>
-                    <Badge variant="outline" className="font-bold text-[10px]">
-                      {detail.candidateInsights.fieldLabel}
-                    </Badge>
+                <div className="flex items-center gap-6">
+                  <div className="hidden lg:flex items-center gap-6 px-6 py-2 border rounded-2xl bg-card/40 backdrop-blur-md">
+                    <div className="flex flex-col gap-0.5">
+                      <span className="text-[10px] font-black text-muted-foreground uppercase tracking-widest opacity-50">
+                        市场状态
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="size-1.5 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.5)]" />
+                        <span className="text-xs font-black uppercase text-emerald-500">
+                          活跃 / 开放
+                        </span>
+                      </div>
+                    </div>
+                    <Separator orientation="vertical" className="h-8" />
+                    <div className="flex flex-col gap-0.5">
+                      <span className="text-[10px] font-black text-muted-foreground uppercase tracking-widest opacity-50">
+                        流动性评分
+                      </span>
+                      <span className="text-xs font-black text-foreground tabular-nums">
+                        84.2{" "}
+                        <span className="text-[10px] opacity-40">Tier 1</span>
+                      </span>
+                    </div>
+                    <Separator orientation="vertical" className="h-8" />
+                    <div className="flex flex-col gap-0.5">
+                      <span className="text-[10px] font-black text-muted-foreground uppercase tracking-widest opacity-50">
+                        对冲容量
+                      </span>
+                      <span className="text-xs font-black text-primary uppercase">
+                        高优势 (Advantage)
+                      </span>
+                    </div>
                   </div>
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    className="rounded-full"
-                  >
-                    <Settings className="size-4" />
-                  </Button>
-                  <Button
-                    variant="outline"
-                    className="gap-2 rounded-xl h-9 px-4"
-                  >
-                    <a
-                      href={selectedOpportunity.url || "#"}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="flex items-center gap-2"
+
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      className="rounded-full hover:bg-muted/80 transition-colors"
+                      onClick={() => setSelectedOpportunity(null)}
                     >
-                      <ExternalLink className="size-4" />
-                      Polymarket
-                    </a>
-                  </Button>
+                      <ChevronRight className="size-4 rotate-180" />
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      className="rounded-full"
+                    >
+                      <Settings className="size-4" />
+                    </Button>
+                    <Button
+                      variant="outline"
+                      className="gap-2 rounded-xl h-9 px-4"
+                    >
+                      <a
+                        href={selectedOpportunity.url || "#"}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="flex items-center gap-2"
+                      >
+                        <ExternalLink className="size-4" />
+                        Polymarket
+                      </a>
+                    </Button>
+                  </div>
                 </div>
               </header>
 
-              <ScrollArea className="flex-1">
+              <ScrollArea className="flex-1 min-h-0">
                 <div className="p-8 space-y-8">
-                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-8 items-start">
-                    <Card className="md:col-span-2 xl:col-span-2 bg-card/30 border-primary/10 overflow-hidden">
+                  <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-stretch">
+                    <Card className="lg:col-span-8 bg-card/30 border-primary/10 overflow-hidden h-full flex flex-col">
                       <CardHeader className="flex flex-row items-center justify-between border-b bg-muted/20 py-4">
                         <div className="space-y-0.5">
                           <CardTitle className="text-sm font-black uppercase tracking-widest text-primary">
-                            Election Command Desk
+                            选举指挥中心
                           </CardTitle>
-                          <CardDescription className="text-[10px] font-bold uppercase">
-                            候选人实时战情板 (30D 拟合盘口)
+                          <CardDescription className="text-xs font-bold uppercase">
+                            参选人实时期望 (30D 融合拟合)
                           </CardDescription>
                         </div>
                         <div className="flex items-center gap-2">
-                          <div className="flex items-center gap-1 text-[10px] font-bold text-muted-foreground">
+                          <div className="flex items-center gap-1 text-xs font-bold text-muted-foreground">
                             <Activity className="size-3" />
                             活跃
                           </div>
@@ -1684,7 +2014,7 @@ export default function DashboardClient() {
                               <div className="flex items-center justify-between mb-4">
                                 <Badge
                                   className={cn(
-                                    "text-[9px] font-black uppercase h-4",
+                                    "text-[13px] font-bold text-muted-foreground uppercase tracking-widest h-5",
                                     index === 0
                                       ? "bg-primary text-primary-foreground"
                                       : "bg-muted-foreground/20 text-muted-foreground",
@@ -1694,7 +2024,7 @@ export default function DashboardClient() {
                                     ? "Leader"
                                     : `Rank #${index + 1}`}
                                 </Badge>
-                                <span className="text-[10px] font-black text-primary">
+                                <span className="text-xs font-black text-primary">
                                   {index === 0
                                     ? "领跑席位"
                                     : `差 ${Math.abs(candidate.probability - detail.candidateInsights.leader.probability).toFixed(1)}pt`}
@@ -1704,9 +2034,9 @@ export default function DashboardClient() {
                                 <CandidateAvatar candidate={candidate} />
                                 <div>
                                   <div className="font-bold text-sm">
-                                    {candidate.name}
+                                    {candidate.nameZh || candidate.name}
                                   </div>
-                                  <div className="text-[10px] font-bold text-muted-foreground uppercase h-3">
+                                  <div className="text-[12px] font-bold text-muted-foreground uppercase">
                                     {candidate.partyLabel}
                                   </div>
                                 </div>
@@ -1740,7 +2070,7 @@ export default function DashboardClient() {
                             <Badge
                               key={item}
                               variant="secondary"
-                              className="bg-muted/50 text-[10px] px-3 font-bold text-muted-foreground border-transparent hover:border-primary/20 transition-colors"
+                              className="bg-muted/50 text-xs px-3 font-bold text-muted-foreground border-transparent hover:border-primary/20 transition-colors"
                             >
                               {item}
                             </Badge>
@@ -1751,7 +2081,7 @@ export default function DashboardClient() {
 
                     <Card
                       className={cn(
-                        "bg-card/30 border-primary/10 overflow-hidden flex flex-col shadow-xl",
+                        "lg:col-span-4 h-full bg-card/30 border-primary/10 overflow-hidden flex flex-col shadow-xl",
                         signalState?.tone === "bullish"
                           ? "border-green-500/20"
                           : signalState?.tone === "bearish"
@@ -1762,11 +2092,11 @@ export default function DashboardClient() {
                       <CardHeader className="border-b bg-muted/20 py-4">
                         <div className="flex items-center justify-between">
                           <CardTitle className="text-sm font-black uppercase tracking-widest">
-                            Alpha Analysis
+                            阿尔法量化分析
                           </CardTitle>
                           <Badge
                             className={cn(
-                              "text-[9px] font-black uppercase tracking-widest h-5",
+                              "text-[11px] font-black uppercase tracking-widest h-5",
                               signalState?.tone === "bullish"
                                 ? "bg-green-500"
                                 : signalState?.tone === "bearish"
@@ -1781,8 +2111,8 @@ export default function DashboardClient() {
                       <CardContent className="flex-1 p-6 flex flex-col justify-between">
                         <div className="space-y-4">
                           <div className="space-y-1">
-                            <span className="text-[10px] font-black text-muted-foreground uppercase tracking-widest">
-                              Model Divergence
+                            <span className="text-xs font-black text-muted-foreground uppercase tracking-widest">
+                              模型偏离度 (Divergence)
                             </span>
                             <div
                               className={cn(
@@ -1798,23 +2128,54 @@ export default function DashboardClient() {
                               )}
                             </div>
                           </div>
-                          <p className="text-xs font-medium leading-relaxed text-muted-foreground">
+                          <p className="text-[13px] font-medium leading-relaxed text-muted-foreground">
                             {signalState?.summary}
                           </p>
+
+                          <div className="pt-4 border-t border-primary/5 space-y-3">
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs font-bold text-muted-foreground/60 uppercase tracking-widest">
+                                PEB 核心数据源
+                              </span>
+                              <Badge
+                                variant="outline"
+                                className="text-[11px] font-bold border-primary/10"
+                              >
+                                {detail.pebSource}
+                              </Badge>
+                            </div>
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs font-bold text-muted-foreground/60 uppercase tracking-widest">
+                                Kalshi 对应合约
+                              </span>
+                              <Badge
+                                variant="outline"
+                                className="text-[11px] font-bold border-primary/10 max-w-[150px] truncate"
+                                title={
+                                  detail.kalshiMarketTitle ||
+                                  detail.kalshiEventTitle
+                                }
+                              >
+                                {detail.kalshiMarketTicker ||
+                                  detail.kalshiMarketTitle ||
+                                  "No Match"}
+                              </Badge>
+                            </div>
+                          </div>
                         </div>
 
-                        <div className="mt-8 grid grid-cols-2 gap-4">
+                        <div className="mt-8 grid grid-cols-2 sm:grid-cols-4 gap-4">
                           {[
-                            ["Polymarket", formatPercent(detail.marketProb)],
-                            ["Kalshi", formatPercent(detail.kalshiProb)],
-                            ["PEB Model", formatPercent(detail.pebProb)],
-                            ["Action", detail.recommendation.action],
+                            ["Polymarket 价", formatPercent(detail.marketProb)],
+                            ["Kalshi 价", formatPercent(detail.kalshiProb)],
+                            ["PEB 模拟概率", formatPercent(detail.pebProb)],
+                            ["操作指令", detail.recommendation.action],
                           ].map(([label, val]) => (
                             <div
                               key={label}
                               className="p-3 rounded-xl bg-muted/30 border border-primary/5 space-y-1"
                             >
-                              <div className="text-[9px] font-bold text-muted-foreground uppercase tracking-widest">
+                              <div className="text-[13px] font-black text-muted-foreground uppercase tracking-widest">
                                 {label}
                               </div>
                               <div className="text-sm font-black">{val}</div>
@@ -1825,21 +2186,22 @@ export default function DashboardClient() {
                     </Card>
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-8 items-start">
-                    <div className="md:col-span-2 xl:col-span-2 space-y-8">
-                      <Card className="bg-card/30 border-primary/10 overflow-hidden">
+                  <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+                    {/* Left Column - Main Charts & Data */}
+                    <div className="lg:col-span-8 space-y-8">
+                      <Card className="bg-card/30 border-primary/10 overflow-hidden shadow-sm">
                         <CardHeader className="border-b bg-muted/20 py-4 flex flex-row items-center justify-between">
                           <div className="space-y-0.5">
                             <CardTitle className="text-sm font-black uppercase tracking-widest">
-                              Hybrid Price Map
+                              混合价格走势图
                             </CardTitle>
-                            <CardDescription className="text-[10px] font-bold uppercase">
+                            <CardDescription className="text-[12px] font-bold uppercase tracking-wider">
                               实时价格、对冲价与 PEB 模型拟合曲线
                             </CardDescription>
                           </div>
                         </CardHeader>
                         <CardContent className="p-8">
-                          <div className="grid grid-cols-4 gap-4 mb-8">
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
                             {[
                               [
                                 "市场概率",
@@ -1865,7 +2227,7 @@ export default function DashboardClient() {
                               ],
                             ].map(([l, v, c]) => (
                               <div key={l} className="space-y-1">
-                                <div className="text-[9px] font-black text-muted-foreground uppercase tracking-widest">
+                                <div className="text-[13px] font-black text-muted-foreground uppercase tracking-widest">
                                   {l}
                                 </div>
                                 <div className={cn("text-xl font-black", c)}>
@@ -1874,43 +2236,80 @@ export default function DashboardClient() {
                               </div>
                             ))}
                           </div>
-                          <div className="h-[300px] w-full">
+                          <div className="h-[350px] w-full">
                             <HybridChart detail={detail} />
                           </div>
-                          <div className="flex items-center justify-center gap-6 mt-6">
-                            {[
-                              ["bg-foreground", "Polymarket"],
-                              ["bg-[#6f92ff]", "Kalshi"],
-                              ["bg-primary", "PEB Model"],
-                            ].map(([bg, label]) => (
-                              <div
-                                key={label}
-                                className="flex items-center gap-2"
-                              >
+                          <div className="flex flex-col gap-4 mt-8 pt-6 border-t border-primary/5">
+                            <div className="flex items-center gap-6">
+                              {[
+                                ["核心市场", "#00ff9d", "line"],
+                                ["Kalshi 盘", "#6f92ff", "dash"],
+                                ["PEB 模拟", "#39d0ff", "glow"],
+                              ].map(([label, color, type]) => (
                                 <div
-                                  className={cn("size-2 rounded-full", bg)}
-                                />
-                                <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
-                                  {label}
-                                </span>
-                              </div>
-                            ))}
+                                  key={label}
+                                  className="flex items-center gap-2.5 group cursor-default"
+                                >
+                                  <div className="relative">
+                                    <div
+                                      className={cn(
+                                        "h-1 w-5 rounded-full shadow-[0_0_8px_var(--color)]",
+                                        type === "dash" &&
+                                          "border-t-2 border-dashed h-0",
+                                      )}
+                                      style={{
+                                        backgroundColor:
+                                          type === "dash"
+                                            ? "transparent"
+                                            : color,
+                                        borderColor:
+                                          type === "dash"
+                                            ? color
+                                            : "transparent",
+                                        // @ts-ignore
+                                        "--color": color,
+                                      }}
+                                    />
+                                    {type === "glow" && (
+                                      <div className="absolute inset-x-0 h-1 bg-white/20 blur-[1px]" />
+                                    )}
+                                  </div>
+                                  <span className="text-[11px] font-black text-muted-foreground group-hover:text-foreground transition-colors uppercase tracking-[0.15em]">
+                                    {label}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                            <div className="flex items-center gap-4 text-[11px] font-bold text-muted-foreground/40 tabular-nums">
+                              <span className="flex items-center gap-1.5">
+                                <Activity className="size-3" />
+                                864 SAMPLES / SEC
+                              </span>
+                              <Separator
+                                orientation="vertical"
+                                className="h-3"
+                              />
+                              <span className="flex items-center gap-1.5">
+                                <ShieldCheck className="size-3" />
+                                全平台链路同步中
+                              </span>
+                            </div>
                           </div>
                         </CardContent>
                       </Card>
 
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                        <Card className="bg-card/30 border-primary/10 overflow-hidden h-fit">
+                        <Card className="bg-card/30 border-primary/10 overflow-hidden h-full flex flex-col">
                           <CardHeader className="border-b bg-muted/20 py-4">
                             <CardTitle className="text-sm font-black uppercase tracking-widest">
                               Contender Board
                             </CardTitle>
-                            <CardDescription className="text-[10px] font-bold uppercase">
+                            <CardDescription className="text-[12px] font-bold uppercase tracking-wider">
                               {detail.candidateInsights.candidates.length}{" "}
                               位参选人/选项盘口
                             </CardDescription>
                           </CardHeader>
-                          <CardContent className="p-0">
+                          <CardContent className="p-0 flex-1">
                             {detail.candidateInsights.candidates.length ===
                             0 ? (
                               <div className="p-12 text-center space-y-3">
@@ -1920,7 +2319,7 @@ export default function DashboardClient() {
                                 </p>
                               </div>
                             ) : (
-                              <div className="divide-y border-b">
+                              <div className="divide-y">
                                 {detail.candidateInsights.candidates.map(
                                   (cand, idx) => (
                                     <div
@@ -1932,15 +2331,15 @@ export default function DashboardClient() {
                                           : "hover:bg-muted/30",
                                       )}
                                     >
-                                      <span className="text-[10px] font-black tabular-nums text-muted-foreground/50 w-4">
+                                      <span className="text-[12px] font-black tabular-nums text-muted-foreground/50 w-4">
                                         {String(idx + 1).padStart(2, "0")}
                                       </span>
                                       <CandidateAvatar candidate={cand} small />
                                       <div className="flex-1 min-w-0">
                                         <div className="font-bold text-sm truncate">
-                                          {cand.name}
+                                          {cand.nameZh || cand.name}
                                         </div>
-                                        <div className="text-[9px] font-bold text-muted-foreground uppercase">
+                                        <div className="text-[13px] font-bold text-muted-foreground uppercase">
                                           {cand.partyLabel}
                                         </div>
                                       </div>
@@ -1948,7 +2347,7 @@ export default function DashboardClient() {
                                         <div className="font-black text-sm tabular-nums">
                                           {formatPercent(cand.probability)}
                                         </div>
-                                        <div className="text-[9px] font-bold text-muted-foreground uppercase">
+                                        <div className="text-[13px] font-bold text-muted-foreground uppercase">
                                           {idx === 0
                                             ? "Leader"
                                             : `-${Math.abs(cand.probability - detail.candidateInsights.leader.probability).toFixed(1)}pt`}
@@ -1962,16 +2361,16 @@ export default function DashboardClient() {
                           </CardContent>
                         </Card>
 
-                        <Card className="bg-card/30 border-primary/10 overflow-hidden h-fit">
+                        <Card className="bg-card/30 border-primary/10 overflow-hidden h-full flex flex-col">
                           <CardHeader className="border-b bg-muted/20 py-4">
                             <CardTitle className="text-sm font-black uppercase tracking-widest">
                               Arbitrage Matrix
                             </CardTitle>
-                            <CardDescription className="text-[10px] font-bold uppercase">
+                            <CardDescription className="text-[12px] font-bold uppercase tracking-wider">
                               多源概率定价偏离
                             </CardDescription>
                           </CardHeader>
-                          <CardContent className="p-6 space-y-6">
+                          <CardContent className="p-6 space-y-6 flex-1">
                             {[
                               {
                                 label: "Polymarket",
@@ -1997,12 +2396,12 @@ export default function DashboardClient() {
                             ].map((row) => (
                               <div key={row.label} className="space-y-2">
                                 <div className="flex items-center justify-between">
-                                  <span className="text-[10px] font-black text-muted-foreground uppercase tracking-widest">
+                                  <span className="text-[13px] font-black text-muted-foreground uppercase tracking-widest">
                                     {row.label}
                                   </span>
                                   <span
                                     className={cn(
-                                      "text-[10px] font-black",
+                                      "text-xs font-black",
                                       Math.abs(row.spread) >= 5
                                         ? "text-amber-500"
                                         : "text-muted-foreground",
@@ -2026,8 +2425,8 @@ export default function DashboardClient() {
                                 </div>
                               </div>
                             ))}
-                            <div className="pt-4 border-t border-primary/5">
-                              <p className="text-[10px] font-medium text-muted-foreground leading-relaxed italic">
+                            <div className="pt-4 border-t border-primary/5 mt-auto">
+                              <p className="text-[13px] font-medium leading-relaxed text-muted-foreground/80 italic">
                                 * 模型偏离超过 5%
                                 时系统将触发对冲信号。当前价差由民调权重与跨所价格实时计算得出。
                               </p>
@@ -2035,105 +2434,134 @@ export default function DashboardClient() {
                           </CardContent>
                         </Card>
                       </div>
-                    </div>
 
-                    <div className="space-y-8">
-                      <Card className="bg-card/30 border-primary/10 overflow-hidden border-l-4 border-l-primary shadow-xl">
-                        <CardHeader className="bg-primary/[0.03] border-b border-primary/10 py-4">
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-2">
-                              <MessageSquare className="size-4 text-primary" />
-                              <CardTitle className="text-sm font-black uppercase tracking-widest">
-                                AI Logic Chain
-                              </CardTitle>
-                            </div>
-                            <Badge className="bg-primary/20 text-primary border-primary/30 text-[9px] font-black tracking-widest uppercase">
-                              Active
-                            </Badge>
+                      <Card className="bg-card/30 border-primary/10 overflow-hidden shadow-xl">
+                        <div className="flex items-center justify-between border-b bg-muted/20 py-4 px-6">
+                          <div className="space-y-0.5">
+                            <CardTitle className="text-sm font-black uppercase tracking-widest text-primary flex items-center gap-2">
+                              民调情报分析
+                              {detail.pollCandidate && (
+                                <Badge
+                                  variant="secondary"
+                                  className="text-[10px] h-4 bg-primary/10 text-primary border-none"
+                                >
+                                  对标: {detail.pollCandidate}
+                                </Badge>
+                              )}
+                            </CardTitle>
+                            <CardDescription className="text-xs font-bold uppercase">
+                              {detail.pollSourceCount > 0
+                                ? `民调数据聚合自 ${detail.pollSource} (${detail.pollPageTitle || "Wikipedia"})`
+                                : "暂无外部民调数据源可用"}
+                            </CardDescription>
                           </div>
-                        </CardHeader>
+                          <div className="text-right">
+                            <div className="text-xs font-black text-primary uppercase">
+                              加权准确率
+                            </div>
+                            <div className="text-lg font-black tabular-nums">
+                              {detail.pollAccuracyAvg > 0
+                                ? `${detail.pollAccuracyAvg}%`
+                                : "--"}
+                            </div>
+                          </div>
+                        </div>
                         <CardContent className="p-0">
-                          <div className="divide-y divide-primary/5">
-                            {detail.reasoning.steps.map((step, idx) => (
-                              <div
-                                key={idx}
-                                className="p-5 space-y-3 group hover:bg-primary/[0.02] transition-colors"
-                              >
-                                <div className="flex items-center justify-between">
-                                  <div className="flex items-center gap-2">
-                                    <span className="flex size-5 items-center justify-center rounded bg-primary/10 text-[9px] font-black text-primary">
-                                      {step.code}
-                                    </span>
-                                    <span className="text-[11px] font-black uppercase tracking-widest text-foreground">
-                                      {step.title}
+                          {detail.polls.length === 0 ? (
+                            <div className="p-6 space-y-3">
+                              <div className="text-sm font-bold">
+                                暂无真实民调明细
+                              </div>
+                              <div className="text-[13px] leading-relaxed text-muted-foreground">
+                                这个市场还没有匹配到可解析的 Wikipedia
+                                公开民调页面。 当前 PEB
+                                会回退到市场内部融合值，不再伪造民调表格。
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="divide-y divide-primary/5">
+                              <div className="grid grid-cols-12 gap-4 px-6 py-3 border-b bg-muted/5 text-[10px] font-black uppercase tracking-wider text-muted-foreground/60">
+                                <div className="col-span-3">民调机构</div>
+                                <div className="col-span-3 text-center">
+                                  支持对象
+                                </div>
+                                <div className="col-span-1 text-center">
+                                  权重
+                                </div>
+                                <div className="col-span-1 text-center">
+                                  支持率
+                                </div>
+                                <div className="col-span-2 text-center">
+                                  准确率
+                                </div>
+                                <div className="col-span-2 text-right">
+                                  样本量
+                                </div>
+                              </div>
+                              {detail.polls.map((poll, idx) => (
+                                <div
+                                  key={idx}
+                                  className="grid grid-cols-12 p-4 items-center hover:bg-muted/30 transition-colors"
+                                >
+                                  <div className="col-span-3 flex items-center gap-3">
+                                    <div className="size-6 rounded-full bg-primary/10 flex items-center justify-center text-[11px] font-black text-primary">
+                                      {poll.name[0]}
+                                    </div>
+                                    <span className="text-[13px] font-bold">
+                                      {poll.name}
                                     </span>
                                   </div>
-                                  <Badge
-                                    variant="outline"
-                                    className="text-[9px] font-black uppercase border-primary/20 text-primary/80 py-0 h-4"
-                                  >
-                                    {step.strength}
-                                  </Badge>
+                                  <div className="col-span-3 text-center">
+                                    <Badge
+                                      variant="outline"
+                                      className="text-[10px] h-4 bg-primary/5 border-primary/20"
+                                    >
+                                      {poll.supportFor ||
+                                        detail.pollCandidate ||
+                                        "--"}
+                                    </Badge>
+                                  </div>
+                                  <div className="col-span-1 text-center font-bold">
+                                    {(poll.weight * 100).toFixed(0)}%
+                                  </div>
+                                  <div className="col-span-1 text-center font-black text-primary">
+                                    {poll.support.toFixed(1)}%
+                                  </div>
+                                  <div className="col-span-2 text-center">
+                                    <div className="h-1.5 w-12 bg-muted rounded-full mx-auto overflow-hidden">
+                                      <div
+                                        className="h-full bg-primary"
+                                        style={{ width: `${poll.accuracy}%` }}
+                                      />
+                                    </div>
+                                    <span className="text-[10px] font-bold mt-1 block">
+                                      {poll.accuracy}%
+                                    </span>
+                                  </div>
+                                  <div className="col-span-2 text-right font-bold tabular-nums">
+                                    {poll.sample.toLocaleString()}
+                                  </div>
                                 </div>
-                                <div className="text-[11px] font-bold text-primary/60 uppercase tracking-tighter">
-                                  Verdict: {step.verdict}
-                                </div>
-                                <p className="text-[13px] font-medium leading-relaxed text-muted-foreground">
-                                  {step.body}
-                                </p>
-                              </div>
-                            ))}
-                          </div>
+                              ))}
+                            </div>
+                          )}
                         </CardContent>
                       </Card>
+                    </div>
 
-                      <Card className="bg-card/30 border-primary/10 overflow-hidden shadow-xl border-t-2 border-t-primary/20">
-                        <CardHeader className="py-4 border-b bg-muted/20">
-                          <div className="flex items-center gap-2">
-                            <Zap className="size-4 text-primary" />
-                            <CardTitle className="text-sm font-black uppercase tracking-widest">
-                              Event Catalysts
-                            </CardTitle>
-                          </div>
-                        </CardHeader>
-                        <CardContent className="p-0">
-                          <div className="divide-y">
-                            {detail.catalysts.map((cat, idx) => (
-                              <div
-                                key={idx}
-                                className="p-5 group hover:bg-muted/20 transition-colors"
-                              >
-                                <div className="flex items-center justify-between mb-2">
-                                  <span className="text-[10px] font-black text-primary uppercase tracking-widest">
-                                    {cat.label}
-                                  </span>
-                                  <span className="text-[10px] font-bold text-muted-foreground">
-                                    {cat.time}
-                                  </span>
-                                </div>
-                                <h5 className="text-sm font-bold mb-2">
-                                  {cat.title}
-                                </h5>
-                                <p className="text-xs font-medium text-muted-foreground leading-relaxed">
-                                  {cat.description}
-                                </p>
-                              </div>
-                            ))}
-                          </div>
-                        </CardContent>
-                      </Card>
-
+                    {/* Right Column - AI & Catalysts */}
+                    <div className="lg:col-span-4 space-y-8">
                       <Card className="bg-card/30 border-primary/10 overflow-hidden shadow-xl">
                         <CardHeader className="py-4 border-b bg-muted/20">
                           <div className="flex items-center gap-2">
                             <BarChart3 className="size-4 text-muted-foreground" />
                             <CardTitle className="text-sm font-black uppercase tracking-widest">
-                              Market Dossier
+                              市场深度报告 (Market Dossier)
                             </CardTitle>
                           </div>
                         </CardHeader>
                         <CardContent className="p-6">
-                          <p className="text-xs font-medium leading-relaxed text-muted-foreground mb-6">
+                          <p className="text-[13px] font-semibold text-muted-foreground">
                             {buildInsightText(selectedOpportunity, detail)}
                           </p>
                           <div className="space-y-4">
@@ -2161,7 +2589,7 @@ export default function DashboardClient() {
                             ].map(([l, v]) => (
                               <div
                                 key={l}
-                                className="flex items-center justify-between text-[11px] font-bold"
+                                className="flex items-center justify-between text-[13px] font-bold"
                               >
                                 <span className="text-muted-foreground uppercase tracking-tighter">
                                   {l}
@@ -2169,6 +2597,42 @@ export default function DashboardClient() {
                                 <span className="text-foreground uppercase italic bg-muted/30 px-2 py-0.5 rounded border border-primary/5">
                                   {v || "--"}
                                 </span>
+                              </div>
+                            ))}
+                          </div>
+                        </CardContent>
+                      </Card>
+
+                      <Card className="bg-card/30 border-primary/10 overflow-hidden shadow-xl border-t-2 border-t-primary/20">
+                        <CardHeader className="py-4 border-b bg-muted/20">
+                          <div className="flex items-center gap-2">
+                            <Zap className="size-4 text-primary" />
+                            <CardTitle className="text-sm font-black uppercase tracking-widest">
+                              关键时间节点 (Catalysts)
+                            </CardTitle>
+                          </div>
+                        </CardHeader>
+                        <CardContent className="p-0">
+                          <div className="divide-y">
+                            {detail.catalysts.map((cat, idx) => (
+                              <div
+                                key={idx}
+                                className="p-5 group hover:bg-muted/20 transition-colors"
+                              >
+                                <div className="flex items-center justify-between mb-2">
+                                  <span className="text-xs font-black text-primary uppercase tracking-widest">
+                                    {cat.label}
+                                  </span>
+                                  <span className="text-xs font-bold text-muted-foreground">
+                                    {cat.time}
+                                  </span>
+                                </div>
+                                <h5 className="text-sm font-bold mb-2">
+                                  {cat.title}
+                                </h5>
+                                <p className="text-xs font-medium text-muted-foreground leading-relaxed">
+                                  {cat.description}
+                                </p>
                               </div>
                             ))}
                           </div>

@@ -7,7 +7,11 @@ from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from src.analysis.dashboard_builder import build_dashboard_payload
+from src.analysis.dashboard_builder import build_dashboard_payload, build_dashboard_sections
+from src.analysis.kalshi_enricher import enrich_opportunities_with_kalshi
+from src.analysis.poll_enricher import enrich_opportunities_with_polls
+from src.data_collection.kalshi_client import KalshiClient
+from src.data_collection.poll_scraper import PollScraper
 from src.data_collection.polymarket_client import PolymarketClient
 from src.models.db_manager import DatabaseManager
 
@@ -24,6 +28,8 @@ app.add_middleware(
 )
 
 client = PolymarketClient()
+kalshi_client = KalshiClient()
+poll_scraper = PollScraper()
 db_manager = DatabaseManager()
 
 _CACHE_TTL_SECONDS = 120
@@ -59,8 +65,22 @@ async def get_dashboard_payload(force_refresh: bool = False) -> Dict[str, Any]:
         ):
             return cached_payload
 
-        events = await client.get_global_election_dashboard(limit=24)
+        events, kalshi_events = await asyncio.gather(
+            client.get_global_election_dashboard(limit=24),
+            kalshi_client.get_open_election_events(),
+        )
         payload = build_dashboard_payload(events)
+        opportunities = enrich_opportunities_with_kalshi(
+            payload.get("opportunities") or [],
+            kalshi_events,
+        )
+        opportunities = await enrich_opportunities_with_polls(
+            opportunities,
+            scraper=poll_scraper,
+            db_manager=db_manager,
+        )
+        payload["opportunities"] = opportunities
+        payload.update(build_dashboard_sections(opportunities))
         _dashboard_cache["payload"] = payload
         _dashboard_cache["expires_at"] = now + _CACHE_TTL_SECONDS
         return payload
