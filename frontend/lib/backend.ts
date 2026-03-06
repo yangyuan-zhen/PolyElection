@@ -1,5 +1,6 @@
 type FetchOptions = {
   revalidate?: number;
+  noStore?: boolean;
 };
 
 function getApiBaseUrl(): string {
@@ -18,7 +19,8 @@ export async function fetchBackendJson<T>(
   const apiBase = getApiBaseUrl();
   const response = await fetch(`${apiBase}${path}`, {
     headers: { Accept: "application/json" },
-    next: { revalidate: options.revalidate ?? 60 },
+    cache: options.noStore ? "no-store" : "default",
+    next: options.noStore ? undefined : { revalidate: options.revalidate ?? 60 },
   });
 
   if (!response.ok) {

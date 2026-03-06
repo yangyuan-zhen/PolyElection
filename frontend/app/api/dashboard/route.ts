@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { fetchBackendJson } from "../../../lib/backend";
 
+export const dynamic = "force-dynamic";
+
 type DashboardResponse = {
   data?: {
     opportunities?: unknown[];
@@ -14,7 +16,7 @@ type DashboardResponse = {
 export async function GET() {
   try {
     const dashboard = await fetchBackendJson<DashboardResponse>("/api/v1/dashboard", {
-      revalidate: 60,
+      noStore: true,
     });
 
     return NextResponse.json({

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PolyElection | 全球选举量化分析看板</title>
+    <title>PolyElection | 选举量化情报站</title>
     <link rel="stylesheet" href="/static/style.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Round" rel="stylesheet">
@@ -49,7 +49,7 @@
         <header class="header-top">
             <div>
                 <h1 class="page-title">选举量化情报站</h1>
-                <p class="page-subtitle">量化全球预测市场的情绪与偏离信号</p>
+                <p class="page-subtitle">量化全球预测市场的情绪、偏离与套利信号</p>
             </div>
 
             <div class="header-side">
@@ -112,8 +112,8 @@
                 <div class="election-grid" id="opportunitiesGrid">
                     <article class="election-card placeholder-card">
                         <span class="card-tag">Loading</span>
-                        <h3 class="election-title">正在加载机会列表...</h3>
-                        <p class="card-description">等待从后端同步 Polymarket 和事件分析数据。</p>
+                        <h3 class="election-title">正在加载市场机会...</h3>
+                        <p class="card-description">等待后端同步 Polymarket 实时事件与量化聚合数据。</p>
                     </article>
                 </div>
             </section>
@@ -127,7 +127,7 @@
                             <div class="news-title">正在加载情报流...</div>
                             <div class="impact-label">
                                 <span class="material-icons-round">insights</span>
-                                等待后端返回最新摘要
+                                等待后端返回最新市场摘要
                             </div>
                         </div>
                     </div>
@@ -148,81 +148,192 @@
 
     <div class="detail-modal hidden" id="detailModal" aria-hidden="true">
         <div class="detail-backdrop" data-close-detail="true"></div>
-        <aside class="detail-panel" role="dialog" aria-modal="true" aria-labelledby="detailTitle">
-            <div class="detail-panel-header">
-                <div>
-                    <div class="detail-kicker">市场详情</div>
-                    <h2 class="detail-title" id="detailTitle">加载中...</h2>
+
+        <section class="detail-workspace" role="dialog" aria-modal="true" aria-labelledby="detailTitle">
+            <header class="workspace-header">
+                <div class="workspace-headline">
+                    <div class="detail-kicker">MARKET WAR ROOM</div>
+                    <h2 class="workspace-title" id="detailTitle">加载中...</h2>
+                    <p class="workspace-subtitle" id="detailSubtitle">正在生成量化决策看板</p>
                 </div>
-                <button class="detail-close" id="detailCloseButton" type="button" aria-label="关闭详情">
-                    <span class="material-icons-round">close</span>
-                </button>
+
+                <div class="workspace-actions">
+                    <button class="icon-button" type="button" title="刷新详情">
+                        <span class="material-icons-round">dashboard_customize</span>
+                    </button>
+                    <button class="icon-button" type="button" title="策略提醒">
+                        <span class="material-icons-round">notifications</span>
+                    </button>
+                    <button class="icon-button" type="button" title="中文模式">
+                        <span class="material-icons-round">translate</span>
+                    </button>
+                    <a class="icon-button link-button" id="detailOpenLink" href="#" target="_blank" rel="noreferrer" title="打开 Polymarket">
+                        <span class="material-icons-round">open_in_new</span>
+                    </a>
+                    <button class="icon-button close-button" id="detailCloseButton" type="button" aria-label="关闭详情">
+                        <span class="material-icons-round">close</span>
+                    </button>
+                </div>
+            </header>
+
+            <section class="workspace-ribbon">
+                <div class="market-badge-row" id="detailMarketBadgeRow"></div>
+                <div class="leader-strip" id="detailLeaderStrip"></div>
+            </section>
+
+            <div class="workspace-grid">
+                <div class="workspace-main">
+                    <section class="quant-card chart-card">
+                        <div class="card-headline">
+                            <div>
+                                <div class="card-kicker">交互式拟合走势图</div>
+                                <h3 class="card-title">市场赔率 vs 民调趋势</h3>
+                            </div>
+                            <div class="card-date" id="detailDateRange">最近 30 天</div>
+                        </div>
+                        <div class="hybrid-chart" id="detailChart"></div>
+                        <div class="chart-legend">
+                            <span class="legend-item">
+                                <span class="legend-dot market"></span>
+                                Polymarket 实时价格
+                            </span>
+                            <span class="legend-item">
+                                <span class="legend-dot kalshi"></span>
+                                Kalshi 对冲价
+                            </span>
+                            <span class="legend-item">
+                                <span class="legend-dot peb"></span>
+                                PEB 融合概率
+                            </span>
+                        </div>
+                    </section>
+
+                    <section class="quant-card wall-card">
+                        <div class="card-headline">
+                            <div>
+                                <div class="card-kicker">Probability Divergence Wall</div>
+                                <h3 class="card-title">多源概率对冲墙</h3>
+                            </div>
+                            <div class="card-caption" id="detailSignalCaption">等待计算</div>
+                        </div>
+                        <div class="probability-grid" id="detailProbabilityWall"></div>
+                    </section>
+
+                    <section class="quant-card roster-card">
+                        <div class="card-headline">
+                            <div>
+                                <div class="card-kicker">Contender Board</div>
+                                <h3 class="card-title">候选人 / 党派盘口</h3>
+                            </div>
+                            <div class="card-caption" id="detailCandidateSummary">等待候选人信息</div>
+                        </div>
+                        <div class="candidate-board" id="detailCandidateBoard"></div>
+                    </section>
+
+                    <section class="quant-card poll-card">
+                        <div class="card-headline">
+                            <div>
+                                <div class="card-kicker">Pollster Breakdown</div>
+                                <h3 class="card-title">民调构成明细</h3>
+                            </div>
+                            <div class="card-caption" id="detailPollSummary">等待计算</div>
+                        </div>
+                        <div class="poll-list" id="detailPollBreakdown"></div>
+                    </section>
+                </div>
+
+                <aside class="workspace-side">
+                    <section class="quant-card signal-card" id="detailSignalCard">
+                        <div class="card-kicker">Divergence Signal</div>
+                        <div class="signal-label" id="detailSignalLabel">扫描中</div>
+                        <div class="signal-value" id="detailSignalValue">--</div>
+                        <div class="signal-caption" id="detailSignalExplain">等待偏离度分析</div>
+                    </section>
+
+                    <section class="quant-card ai-card">
+                        <div class="card-headline compact">
+                            <div>
+                                <div class="card-kicker">AI Reasoning Chain</div>
+                                <h3 class="card-title">AI 选情逻辑链</h3>
+                            </div>
+                            <div class="decision-pill" id="detailRecommendation">观望</div>
+                        </div>
+                        <div class="reasoning-list" id="detailReasoningChain"></div>
+                    </section>
+
+                    <section class="quant-card meta-card">
+                        <div class="card-headline compact">
+                            <div>
+                                <div class="card-kicker">Election Dossier</div>
+                                <h3 class="card-title">选举情况总览</h3>
+                            </div>
+                        </div>
+                        <p class="detail-description" id="detailDescription">等待加载市场摘要。</p>
+
+                        <div class="detail-meta-grid">
+                            <div class="meta-stat">
+                                <div class="meta-stat-label">融合概率</div>
+                                <div class="meta-stat-value" id="detailPebProb">--</div>
+                            </div>
+                            <div class="meta-stat">
+                                <div class="meta-stat-label">主市场概率</div>
+                                <div class="meta-stat-value" id="detailMarketProb">--</div>
+                            </div>
+                            <div class="meta-stat">
+                                <div class="meta-stat-label">当前主导结果</div>
+                                <div class="meta-stat-value small" id="detailOutcome">--</div>
+                            </div>
+                            <div class="meta-stat">
+                                <div class="meta-stat-label">倒计时</div>
+                                <div class="meta-stat-value small" id="detailTimeLabel">--</div>
+                            </div>
+                        </div>
+
+                        <div class="detail-info-list">
+                            <div class="detail-info-row">
+                                <span class="detail-info-label">市场结构</span>
+                                <span class="detail-info-value" id="detailStructure">--</span>
+                            </div>
+                            <div class="detail-info-row">
+                                <span class="detail-info-label">领先优势</span>
+                                <span class="detail-info-value" id="detailLeaderGap">--</span>
+                            </div>
+                            <div class="detail-info-row">
+                                <span class="detail-info-label">市场问题</span>
+                                <span class="detail-info-value" id="detailQuestion">--</span>
+                            </div>
+                            <div class="detail-info-row">
+                                <span class="detail-info-label">24h 成交额</span>
+                                <span class="detail-info-value" id="detailVolume">--</span>
+                            </div>
+                            <div class="detail-info-row">
+                                <span class="detail-info-label">流动性</span>
+                                <span class="detail-info-value" id="detailLiquidity">--</span>
+                            </div>
+                            <div class="detail-info-row">
+                                <span class="detail-info-label">预计结算</span>
+                                <span class="detail-info-value" id="detailEndDate">--</span>
+                            </div>
+                        </div>
+                    </section>
+
+                    <section class="quant-card catalyst-card">
+                        <div class="card-headline compact">
+                            <div>
+                                <div class="card-kicker">Event Catalysts</div>
+                                <h3 class="card-title">关键事件冲击点</h3>
+                            </div>
+                        </div>
+                        <div class="timeline-list" id="detailCatalysts"></div>
+                    </section>
+
+                    <div class="detail-actions">
+                        <a class="card-link" id="detailOpenLinkSecondary" href="#" target="_blank" rel="noreferrer">打开 Polymarket</a>
+                        <button class="card-link secondary" id="detailCloseSecondary" type="button">关闭看板</button>
+                    </div>
+                </aside>
             </div>
-
-            <div class="detail-scroll">
-                <p class="detail-description" id="detailDescription">等待加载市场详情。</p>
-
-                <div class="detail-section">
-                    <div class="detail-section-title">核心指标</div>
-                    <div class="detail-stat-grid">
-                        <div class="detail-stat-card">
-                            <div class="detail-stat-label">融合概率</div>
-                            <div class="detail-stat-value" id="detailPebProb">--</div>
-                        </div>
-                        <div class="detail-stat-card">
-                            <div class="detail-stat-label">主市场概率</div>
-                            <div class="detail-stat-value" id="detailMarketProb">--</div>
-                        </div>
-                        <div class="detail-stat-card">
-                            <div class="detail-stat-label">市场价差</div>
-                            <div class="detail-stat-value" id="detailSpread">--</div>
-                        </div>
-                        <div class="detail-stat-card">
-                            <div class="detail-stat-label">当前主导结果</div>
-                            <div class="detail-stat-value detail-stat-small" id="detailOutcome">--</div>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="detail-section">
-                    <div class="detail-section-title">选举情况</div>
-                    <div class="detail-info-list">
-                        <div class="detail-info-row">
-                            <span class="detail-info-label">市场问题</span>
-                            <span class="detail-info-value" id="detailQuestion">--</span>
-                        </div>
-                        <div class="detail-info-row">
-                            <span class="detail-info-label">24h 成交额</span>
-                            <span class="detail-info-value" id="detailVolume">--</span>
-                        </div>
-                        <div class="detail-info-row">
-                            <span class="detail-info-label">流动性</span>
-                            <span class="detail-info-value" id="detailLiquidity">--</span>
-                        </div>
-                        <div class="detail-info-row">
-                            <span class="detail-info-label">预计结算</span>
-                            <span class="detail-info-value" id="detailEndDate">--</span>
-                        </div>
-                        <div class="detail-info-row">
-                            <span class="detail-info-label">倒计时</span>
-                            <span class="detail-info-value" id="detailTimeLabel">--</span>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="detail-section">
-                    <div class="detail-section-title">市场解读</div>
-                    <div class="detail-insight-box" id="detailInsight">
-                        等待生成市场解读。
-                    </div>
-                </div>
-
-                <div class="detail-actions">
-                    <a class="card-link" id="detailOpenLink" href="#" target="_blank" rel="noreferrer">打开 Polymarket</a>
-                    <button class="card-link secondary" id="detailCloseSecondary" type="button">关闭</button>
-                </div>
-            </div>
-        </aside>
+        </section>
     </div>
 
     <script src="/static/app.js"></script>
