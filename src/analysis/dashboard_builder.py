@@ -1,6 +1,46 @@
 import json
+import re
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional
+
+TRANSLATION_REPLACEMENTS = [
+    ("Democratic Presidential Nominee", "民主党总统候选人"),
+    ("Republican Presidential Nominee", "共和党总统候选人"),
+    ("Presidential Election Winner", "总统选举获胜者"),
+    ("House of Representatives", "众议院"),
+    ("Chamber of Representatives", "众议院"),
+    ("Prime Minister", "总理"),
+    ("Presidential", "总统"),
+    ("President", "总统"),
+    ("Election", "选举"),
+    ("Winner", "获胜者"),
+    ("Nominee", "候选人"),
+    ("Senate", "参议院"),
+    ("Parliamentary", "议会"),
+    ("Parliament", "议会"),
+    ("Legislative", "立法机构"),
+    ("Primary", "初选"),
+    ("Governor", "州长"),
+    ("Mayor", "市长"),
+    ("Minister", "部长"),
+    ("Democratic", "民主党"),
+    ("Republican", "共和党"),
+    ("Colombia", "哥伦比亚"),
+    ("Hungary", "匈牙利"),
+    ("Brazil", "巴西"),
+    ("Texas", "得州"),
+    ("Nepal", "尼泊尔"),
+    ("Slovenia", "斯洛文尼亚"),
+    ("Castilla y Leon", "卡斯蒂利亚-莱昂"),
+    ("Baden-Württemberg", "巴登-符腾堡"),
+    ("Marseille", "马赛"),
+    ("Santa Cruz de la Sierra", "圣克鲁斯"),
+    ("Sucre", "苏克雷"),
+    ("Rhineland-Palatinate", "莱茵兰-普法尔茨"),
+    ("Will Trump visit China", "特朗普会访问中国"),
+    ("Yes", "是"),
+    ("No", "否"),
+]
 
 
 def _coerce_float(value: Any, default: float = 0.0) -> float:
@@ -77,6 +117,44 @@ def _format_relative_time(target: Optional[datetime], now: datetime) -> str:
     return f"{max(minutes, 1)}m"
 
 
+def _format_relative_time_zh(target: Optional[datetime], now: datetime) -> str:
+    if target is None:
+        return "实时"
+
+    delta_seconds = int((target - now).total_seconds())
+    if delta_seconds <= 0:
+        return "实时"
+
+    days, remainder = divmod(delta_seconds, 86400)
+    hours, remainder = divmod(remainder, 3600)
+    minutes, _ = divmod(remainder, 60)
+
+    if days > 0:
+        return f"{days}天"
+    if hours > 0:
+        return f"{hours}小时"
+    return f"{max(minutes, 1)}分钟"
+
+
+def _translate_text(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+
+    translated = text
+    for source, target in TRANSLATION_REPLACEMENTS:
+        translated = re.sub(source, target, translated, flags=re.IGNORECASE)
+
+    translated = translated.replace("will resolve to", "将按以下结果结算")
+    translated = translated.replace("This market", "该市场")
+    translated = translated.replace("market", "市场")
+    translated = translated.replace("scheduled to take place on", "预计举行日期为")
+    translated = translated.replace("takes place on", "举行日期为")
+    translated = translated.replace(" if required", "（如需要）")
+    translated = re.sub(r"\s+", " ", translated).strip()
+    return translated
+
+
 def _pick_market_probability(market: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     outcomes = [str(item) for item in _coerce_list(market.get("outcomes"))]
     prices = [_coerce_float(item, default=-1.0) for item in _coerce_list(market.get("outcomePrices"))]
@@ -91,12 +169,10 @@ def _pick_market_probability(market: Dict[str, Any]) -> Optional[Dict[str, Any]]
 
     normalized_outcomes = [label.strip().lower() for _, label, _ in valid_pairs]
     if set(normalized_outcomes) == {"yes", "no"}:
-        for index, label, price in valid_pairs:
-            if label.strip().lower() == "yes":
-                chosen = (index, label, price)
-                break
-        else:
-            chosen = max(valid_pairs, key=lambda item: item[2])
+        chosen = next(
+            (pair for pair in valid_pairs if pair[1].strip().lower() == "yes"),
+            max(valid_pairs, key=lambda item: item[2]),
+        )
     else:
         chosen = max(valid_pairs, key=lambda item: item[2])
 
@@ -112,10 +188,12 @@ def _pick_market_probability(market: Dict[str, Any]) -> Optional[Dict[str, Any]]
 
     return {
         "label": label,
+        "label_zh": _translate_text(label) or label,
         "price": price,
         "volume": volume,
         "liquidity": liquidity,
         "question": question,
+        "question_zh": _translate_text(question) or question,
     }
 
 
@@ -160,9 +238,13 @@ def _build_opportunity(event: Dict[str, Any], now: datetime) -> Optional[Dict[st
         "slug": slug,
         "url": f"https://polymarket.com/event/{slug}" if slug else None,
         "title": title,
+        "title_zh": _translate_text(title) or title,
         "description": description,
+        "description_zh": _translate_text(description) or description,
         "outcome_label": primary["label"],
+        "outcome_label_zh": primary["label_zh"],
         "market_question": primary["question"],
+        "market_question_zh": primary["question_zh"],
         "peb_prob": round(blended_probability * 100, 1),
         "market_price": round(market_probability * 100, 1),
         "divergence": round(divergence * 100, 1),
@@ -174,6 +256,7 @@ def _build_opportunity(event: Dict[str, Any], now: datetime) -> Optional[Dict[st
         "liquidity_label": _format_currency(liquidity),
         "end_date": event_end.isoformat() if event_end else None,
         "time_label": _format_relative_time(event_end, now),
+        "time_label_zh": _format_relative_time_zh(event_end, now),
     }
 
 
@@ -181,16 +264,8 @@ def _build_intelligence(opportunities: List[Dict[str, Any]], now: datetime) -> L
     if not opportunities:
         return []
 
-    sorted_by_volume = sorted(
-        opportunities,
-        key=lambda item: item["volume_24h"],
-        reverse=True,
-    )
-    sorted_by_liquidity = sorted(
-        opportunities,
-        key=lambda item: item["liquidity"],
-        reverse=True,
-    )
+    sorted_by_volume = sorted(opportunities, key=lambda item: item["volume_24h"], reverse=True)
+    sorted_by_liquidity = sorted(opportunities, key=lambda item: item["liquidity"], reverse=True)
     sorted_by_time = sorted(
         opportunities,
         key=lambda item: item["end_date"] or "9999-12-31T00:00:00+00:00",
@@ -203,32 +278,32 @@ def _build_intelligence(opportunities: List[Dict[str, Any]], now: datetime) -> L
 
     feed = [
         {
-            "tag": "24H VOLUME",
-            "title": sorted_by_volume[0]["title"],
+            "tag": "24小时成交额",
+            "title": sorted_by_volume[0]["title_zh"],
             "impact": (
-                f"{sorted_by_volume[0]['outcome_label']} leads at "
-                f"{sorted_by_volume[0]['market_price']:.1f}% with "
-                f"{sorted_by_volume[0]['volume_24h_label']} 24h volume."
+                f"{sorted_by_volume[0]['outcome_label_zh']} 当前领先，主市场价格 "
+                f"{sorted_by_volume[0]['market_price']:.1f}%，24小时成交额 "
+                f"{sorted_by_volume[0]['volume_24h_label']}。"
             ),
-            "time": "LIVE",
+            "time": "实时",
         },
         {
-            "tag": "LIQUIDITY",
-            "title": sorted_by_liquidity[0]["title"],
+            "tag": "流动性",
+            "title": sorted_by_liquidity[0]["title_zh"],
             "impact": (
-                f"{sorted_by_liquidity[0]['liquidity_label']} liquidity. "
-                f"Primary outcome: {sorted_by_liquidity[0]['outcome_label']}."
+                f"流动性达到 {sorted_by_liquidity[0]['liquidity_label']}，"
+                f"当前主导结果为 {sorted_by_liquidity[0]['outcome_label_zh']}。"
             ),
-            "time": "LIVE",
+            "time": "实时",
         },
         {
-            "tag": "SPREAD",
-            "title": sorted_by_divergence[0]["title"],
+            "tag": "价差",
+            "title": sorted_by_divergence[0]["title_zh"],
             "impact": (
-                f"Blend {sorted_by_divergence[0]['peb_prob']:.1f}% vs "
-                f"primary {sorted_by_divergence[0]['market_price']:.1f}%."
+                f"融合概率 {sorted_by_divergence[0]['peb_prob']:.1f}% ，"
+                f"主市场概率 {sorted_by_divergence[0]['market_price']:.1f}%。"
             ),
-            "time": sorted_by_divergence[0]["time_label"],
+            "time": sorted_by_divergence[0]["time_label_zh"],
         },
     ]
 
@@ -236,13 +311,13 @@ def _build_intelligence(opportunities: List[Dict[str, Any]], now: datetime) -> L
     earliest_end = _parse_datetime(earliest["end_date"])
     if earliest_end and earliest_end > now:
         feed[2] = {
-            "tag": "CLOSING",
-            "title": earliest["title"],
+            "tag": "临近结算",
+            "title": earliest["title_zh"],
             "impact": (
-                f"Ends {earliest_end.date().isoformat()}. "
-                f"Leader: {earliest['outcome_label']} at {earliest['market_price']:.1f}%."
+                f"预计在 {earliest_end.date().isoformat()} 结算，"
+                f"当前领先结果为 {earliest['outcome_label_zh']}，概率 {earliest['market_price']:.1f}%。"
             ),
-            "time": earliest["time_label"],
+            "time": earliest["time_label_zh"],
         }
 
     return feed
@@ -258,8 +333,9 @@ def _build_countdown(opportunities: List[Dict[str, Any]], now: datetime) -> List
         upcoming.append(
             {
                 "title": item["title"],
+                "title_zh": item["title_zh"],
                 "days_left": days_left,
-                "label": f"{days_left}d" if days_left > 0 else "Today",
+                "label": f"{days_left}天" if days_left > 0 else "今天",
             }
         )
 

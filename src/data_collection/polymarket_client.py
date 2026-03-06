@@ -25,15 +25,6 @@ def _as_float(value: Any) -> float:
 
 class PolymarketClient:
     BASE_URL = "https://gamma-api.polymarket.com"
-    SEARCH_TERMS = (
-        "election",
-        "president",
-        "prime minister",
-        "parliament",
-        "senate",
-        "governor",
-        "mayor",
-    )
     KEYWORDS = (
         "election",
         "president",
@@ -47,12 +38,14 @@ class PolymarketClient:
         "cabinet",
         "chancellor",
     )
+    DEFAULT_PAGE_SIZE = 50
 
     def __init__(self, timeout: int = 30):
         self.timeout = timeout
         self.base_url = os.getenv("POLYMARKET_GAMMA_API_BASE_URL", self.BASE_URL).rstrip("/")
         self.verify_ssl = _env_flag("POLYMARKET_VERIFY_SSL", default=False)
         self.trust_env = _env_flag("POLYMARKET_TRUST_ENV", default=False)
+        self.proxy_url = os.getenv("POLYMARKET_PROXY_URL")
         self.default_headers = {
             "Accept": "application/json",
             "User-Agent": (
@@ -70,6 +63,7 @@ class PolymarketClient:
             follow_redirects=True,
             trust_env=self.trust_env,
             verify=self.verify_ssl,
+            proxy=self.proxy_url,
             headers=self.default_headers,
         ) as client:
             response = await client.get(url, params=params)
@@ -101,21 +95,56 @@ class PolymarketClient:
             _as_float(event.get("volume")),
         )
 
-    async def get_election_events(self, search_term: str = "election") -> List[Dict[str, Any]]:
-        params = {
+    async def get_active_events(
+        self,
+        limit: int = DEFAULT_PAGE_SIZE,
+        offset: int = 0,
+    ) -> List[Dict[str, Any]]:
+        primary_params = {
             "active": "true",
             "closed": "false",
-            "archived": "false",
-            "limit": 50,
-            "search": search_term,
-            "order": "volume24hr",
-            "ascending": "false",
+            "limit": limit,
+            "offset": offset,
+        }
+        fallback_params = {
+            "limit": limit,
+            "offset": offset,
         }
         try:
-            events = await self._get("/events", params=params)
+            events = await self._get("/events", params=primary_params)
             return events if isinstance(events, list) else []
+        except httpx.HTTPStatusError as exc:
+            response = exc.response
+            if response is not None and response.status_code == 422:
+                logger.warning(
+                    "Primary /events query returned 422 at offset %s, retrying with fallback params. Body: %s",
+                    offset,
+                    response.text[:300],
+                )
+                try:
+                    events = await self._get("/events", params=fallback_params)
+                    if isinstance(events, list):
+                        return [
+                            event
+                            for event in events
+                            if bool(event.get("active")) and not bool(event.get("closed"))
+                        ]
+                except Exception as fallback_exc:
+                    logger.error(
+                        "Fallback active events query failed at offset %s: %r",
+                        offset,
+                        fallback_exc,
+                    )
+                    return []
+            logger.error(
+                "Error fetching active events at offset %s: status=%s body=%s",
+                offset,
+                response.status_code if response is not None else "unknown",
+                response.text[:300] if response is not None else str(exc),
+            )
+            return []
         except Exception as exc:
-            logger.error("Error fetching election events for '%s': %s", search_term, exc)
+            logger.error("Error fetching active events at offset %s: %r", offset, exc)
             return []
 
     async def get_market_details(self, market_id: str) -> Dict[str, Any]:
@@ -123,23 +152,31 @@ class PolymarketClient:
             market = await self._get(f"/markets/{market_id}")
             return market if isinstance(market, dict) else {}
         except Exception as exc:
-            logger.error("Error fetching market %s: %s", market_id, exc)
+            logger.error("Error fetching market %s: %r", market_id, exc)
             return {}
 
     async def get_global_election_dashboard(self, limit: int = 24) -> List[Dict[str, Any]]:
         seen_ids = set()
         collected: List[Dict[str, Any]] = []
+        offset = 0
+        max_pages = 5
 
-        for term in self.SEARCH_TERMS:
-            events = await self.get_election_events(term)
+        for _ in range(max_pages):
+            events = await self.get_active_events(limit=self.DEFAULT_PAGE_SIZE, offset=offset)
+            if not events:
+                break
+
             for event in events:
                 event_id = str(event.get("id") or "")
                 if not event_id or event_id in seen_ids:
                     continue
-                if not self._is_relevant_event(event):
-                    continue
                 seen_ids.add(event_id)
-                collected.append(event)
+                if self._is_relevant_event(event):
+                    collected.append(event)
+
+            if len(events) < self.DEFAULT_PAGE_SIZE:
+                break
+            offset += self.DEFAULT_PAGE_SIZE
 
         collected.sort(key=self._event_sort_key, reverse=True)
         return collected[:limit]
