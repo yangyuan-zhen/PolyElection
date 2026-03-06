@@ -237,7 +237,8 @@
         : Math.abs(spread) >= 5
           ? "可交易价差信号"
           : "中性观望区";
-    const leader = detail?.candidateInsights?.leader?.name || safeOutcome(event);
+    const leader =
+      detail?.candidateInsights?.leader?.name || safeOutcome(event);
     return `${extractRegion(safeTitle(event))} · ${extractElectionType(safeTitle(event))} · ${leader} 领跑 · ${signal} · Kalshi ${formatPercent(detail.kalshiProb)}`;
   }
 
@@ -765,7 +766,10 @@
   }
 
   function getCandidateBoard(event) {
-    if (Array.isArray(event?.candidate_board) && event.candidate_board.length > 0) {
+    if (
+      Array.isArray(event?.candidate_board) &&
+      event.candidate_board.length > 0
+    ) {
       return event.candidate_board.map((item) => ({
         name: item?.name_zh || item?.name || "未知候选人",
         probability: toNumber(item?.probability),
@@ -798,12 +802,14 @@
   }
 
   function initialsFromName(name) {
-    return String(name || "")
-      .split(/\s+/)
-      .filter(Boolean)
-      .slice(0, 2)
-      .map((part) => part[0]?.toUpperCase() || "")
-      .join("") || "?";
+    return (
+      String(name || "")
+        .split(/\s+/)
+        .filter(Boolean)
+        .slice(0, 2)
+        .map((part) => part[0]?.toUpperCase() || "")
+        .join("") || "?"
+    );
   }
 
   function buildAvatarMarkup(candidate) {
@@ -820,14 +826,21 @@
     const candidates = getCandidateBoard(event)
       .sort((left, right) => right.probability - left.probability)
       .slice(0, 8);
-    const leader = candidates[0] || { name: safeOutcome(event), probability: toNumber(event?.market_price) };
+    const leader = candidates[0] || {
+      name: safeOutcome(event),
+      probability: toNumber(event?.market_price),
+    };
     const runnerUp = candidates[1] || null;
-    const leaderGap = runnerUp ? leader.probability - runnerUp.probability : leader.probability;
+    const leaderGap = runnerUp
+      ? leader.probability - runnerUp.probability
+      : leader.probability;
     const topTwoShare = candidates
       .slice(0, 2)
       .reduce((sum, candidate) => sum + candidate.probability, 0);
     const structureLabel =
-      candidates.length <= 2 ? "二元对赌市场" : `${candidates.length} 人 / 党派竞争`;
+      candidates.length <= 2
+        ? "二元对赌市场"
+        : `${candidates.length} 人 / 党派竞争`;
 
     return {
       candidates,
@@ -1074,27 +1087,19 @@
       .slice(0, 3)
       .map((candidate, index) => {
         const tone = index === 0 ? "leader" : index === 1 ? "runner" : "field";
-        const label =
-          index === 0
-            ? "领跑"
-            : index === 1
-              ? `第二名 差 ${Math.abs(insights.leaderGap).toFixed(1)}pt`
-              : "追赶组";
-        return [
-          `<div class="leader-card ${tone}">`,
-          `<div class="leader-label">${escapeHtml(label)}</div>`,
-          '<div class="leader-persona">',
-          `<div class="candidate-avatar small">${buildAvatarMarkup(candidate)}</div>`,
-          '<div class="leader-persona-copy">',
-          `<div class="leader-name">${escapeHtml(candidate.name)}</div>`,
-          candidate.partyLabel
-            ? `<div class="leader-party">${escapeHtml(candidate.partyLabel)}</div>`
-            : "",
-          "</div>",
-          "</div>",
-          `<div class="leader-meta">即时盘口 ${formatPercent(candidate.probability)}</div>`,
-          "</div>",
-        ].join("");
+        const label = index === 0 ? "领跑" : index === 1 ? "次席" : "追赶";
+        return `
+          <div class="leader-card ${tone}">
+            <div class="leader-head">
+               <div class="candidate-avatar small">${buildAvatarMarkup(candidate)}</div>
+               <div class="leader-persona">
+                 <div class="leader-name">${escapeHtml(candidate.name)}</div>
+                 <div class="leader-meta">${formatPercent(candidate.probability)}</div>
+               </div>
+            </div>
+            <div class="leader-track"><div class="leader-fill" style="width:${candidate.probability}%"></div></div>
+          </div>
+        `;
       })
       .join("");
   }
@@ -1142,12 +1147,34 @@
 
   function renderSignal(event, detail) {
     const spread = toNumber(event?.divergence);
-    elements.detailSignalCard.className = `quant-card signal-card${Math.abs(spread) >= 5 ? " hot" : ""}`;
+    elements.detailSignalCard.className = `quant-card highlight-card signal-focus${Math.abs(spread) >= 5 ? " hot" : ""}`;
     elements.detailSignalLabel.textContent = buildSignalLabel(spread);
     elements.detailSignalValue.textContent = formatSignedPercent(spread);
     elements.detailSignalCaption.textContent =
-      Math.abs(spread) >= 5 ? "套利信号已触发" : "价差仍在中性区";
-    elements.detailSignalExplain.textContent = `Polymarket ${formatPercent(detail.marketProb)} vs Kalshi ${formatPercent(detail.kalshiProb)} vs PEB ${formatPercent(detail.pebProb)}`;
+      Math.abs(spread) >= 5 ? "套利信号触发" : "均衡值";
+
+    const boxes = [
+      { label: "Polymarket", val: detail.marketProb, tone: "" },
+      { label: "Kalshi", val: detail.kalshiProb, tone: "kalshi" },
+      { label: "PEB 融合", val: detail.pebProb, tone: "peb" },
+      {
+        label: "执行建议",
+        val: detail.recommendation.action,
+        isText: true,
+        tone: detail.recommendation.tone,
+      },
+    ];
+
+    elements.detailSignalExplain.innerHTML = `<div class="signal-boxes">${boxes
+      .map(
+        (box) => `
+      <div class="signal-mini-box ${box.tone}">
+        <span class="mini-label">${box.label}</span>
+        <span class="mini-value">${box.isText ? box.val : formatPercent(box.val)}</span>
+      </div>
+    `,
+      )
+      .join("")}</div>`;
   }
 
   function openDetailModal(event) {
