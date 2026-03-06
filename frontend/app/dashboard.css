@@ -651,24 +651,37 @@ body {
   white-space: nowrap;
 }
 
-.detail-modal {
-  position: fixed;
-  inset: 0;
-  z-index: 220;
+.detail-dialog-content {
+  width: calc(100vw - 24px) !important;
+  max-width: none !important;
+  height: calc(100vh - 24px);
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
 }
 
-.detail-backdrop {
-  position: absolute;
-  inset: 0;
-  background: rgba(1, 6, 12, 0.72);
-  backdrop-filter: blur(10px);
+.detail-scroll-area {
+  height: 100%;
+  border-radius: 28px;
+}
+
+.detail-scroll-area [data-slot="scroll-area-viewport"] {
+  border-radius: inherit;
+}
+
+.workspace-separator {
+  background: rgba(255, 255, 255, 0.08);
 }
 
 .detail-workspace {
-  position: absolute;
-  inset: 24px;
+  position: relative;
   display: flex;
   flex-direction: column;
+  min-height: 100%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
   padding: 1.5rem;
   border-radius: 28px;
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -708,6 +721,249 @@ body {
   display: grid;
   gap: 0.9rem;
   margin-bottom: 1.2rem;
+}
+
+.command-deck {
+  margin-bottom: 1.25rem;
+}
+
+.command-surface {
+  border-radius: 24px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background:
+    linear-gradient(135deg, rgba(0, 255, 157, 0.08), transparent 36%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0.01)),
+    rgba(7, 13, 21, 0.92);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    0 30px 60px rgba(0, 0, 0, 0.32);
+}
+
+.command-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) minmax(300px, 0.8fr);
+  gap: 1rem;
+  padding: 1.15rem;
+}
+
+.command-main {
+  min-width: 0;
+}
+
+.command-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: flex-end;
+  margin-bottom: 1rem;
+}
+
+.command-head-meta {
+  color: var(--text-dim);
+  font-size: 0.82rem;
+  white-space: nowrap;
+}
+
+.candidate-cluster {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.9rem;
+}
+
+.combatant-card {
+  padding: 1rem;
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+  min-height: 180px;
+}
+
+.combatant-card.primary {
+  border-color: rgba(0, 255, 157, 0.24);
+  background:
+    linear-gradient(180deg, rgba(0, 255, 157, 0.12), rgba(255, 255, 255, 0.025));
+}
+
+.combatant-card.secondary {
+  border-color: rgba(57, 208, 255, 0.18);
+}
+
+.combatant-top,
+.duel-card-head,
+.playbook-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.combatant-tag,
+.combatant-delta,
+.signal-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.combatant-tag {
+  color: var(--accent-secondary);
+  background: rgba(57, 208, 255, 0.1);
+}
+
+.combatant-delta,
+.signal-pill.calm {
+  color: var(--text-dim);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.signal-pill.active {
+  color: var(--accent-secondary);
+  background: rgba(57, 208, 255, 0.12);
+}
+
+.signal-pill.critical {
+  color: var(--accent-primary);
+  background: rgba(0, 255, 157, 0.12);
+}
+
+.combatant-persona,
+.duel-card-persona {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  margin-top: 1rem;
+}
+
+.combatant-copy,
+.duel-card-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.combatant-copy strong,
+.duel-card-copy b {
+  font-size: 1rem;
+}
+
+.combatant-metric {
+  margin-top: 1.2rem;
+  font-size: 2.25rem;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+}
+
+.combatant-track {
+  position: relative;
+  height: 10px;
+  margin-top: 0.9rem;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.combatant-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, rgba(0, 255, 157, 0.85), rgba(57, 208, 255, 0.92));
+}
+
+.watch-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  margin-top: 1rem;
+}
+
+.watch-chip {
+  min-height: 36px;
+  padding: 0.55rem 0.8rem;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-dim);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.hero-signal-card {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  min-height: 100%;
+  padding: 1rem;
+  border-radius: 22px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background:
+    radial-gradient(circle at top right, rgba(57, 208, 255, 0.08), transparent 34%),
+    rgba(8, 14, 24, 0.96);
+}
+
+.hero-signal-card.critical {
+  border-color: rgba(0, 255, 157, 0.28);
+  box-shadow: inset 0 0 0 1px rgba(0, 255, 157, 0.08), 0 0 30px rgba(0, 255, 157, 0.1);
+}
+
+.hero-signal-card.active {
+  border-color: rgba(57, 208, 255, 0.22);
+}
+
+.hero-signal-label {
+  margin-top: 0.7rem;
+  color: var(--accent-primary);
+  font-size: 0.9rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.hero-signal-value {
+  margin-top: 0.4rem;
+  font-size: 4rem;
+  line-height: 1;
+  font-weight: 900;
+  color: var(--accent-primary);
+  letter-spacing: -0.05em;
+}
+
+.hero-signal-copy,
+.playbook-copy {
+  margin: 0.8rem 0 0;
+  color: var(--text-dim);
+  line-height: 1.7;
+}
+
+.hero-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.8rem;
+  margin-top: 1.15rem;
+}
+
+.hero-metric {
+  padding: 0.85rem;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.hero-metric span,
+.chart-metric span {
+  display: block;
+  color: var(--text-dim);
+  font-size: 0.74rem;
+}
+
+.hero-metric strong,
+.chart-metric strong {
+  display: block;
+  margin-top: 0.3rem;
+  font-size: 1.05rem;
 }
 
 .market-badge-row,
@@ -835,8 +1091,8 @@ body {
 
 .icon-button {
   justify-content: center;
-  width: 42px;
-  height: 42px;
+  width: 44px;
+  height: 44px;
   border-radius: 12px;
   cursor: pointer;
   text-decoration: none;
@@ -854,30 +1110,35 @@ body {
 }
 
 .workspace-grid {
-  flex: 1;
   grid-template-columns: minmax(0, 1.7fr) minmax(340px, 0.9fr);
   gap: 1.25rem;
-  min-height: 0;
+  align-items: start;
 }
 
 .workspace-main,
 .workspace-side {
   display: grid;
   gap: 1rem;
-  min-height: 0;
+  align-content: start;
 }
 
 .workspace-main {
-  grid-template-rows: 1.35fr auto auto;
+  grid-template-rows: auto;
+}
+
+.workspace-lower-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.85fr);
+  gap: 1rem;
 }
 
 .workspace-side {
-  grid-template-rows: auto auto auto auto auto;
+  grid-template-rows: auto;
 }
 
 .quant-card {
   padding: 1.2rem;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .compact {
@@ -886,6 +1147,34 @@ body {
 
 .chart-card {
   min-height: 0;
+}
+
+.chart-metric-row {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin: 0.85rem 0 0.2rem;
+}
+
+.chart-metric {
+  padding: 0.8rem 0.9rem;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.chart-metric.market strong,
+.chart-metric.spread strong,
+.playbook-row strong {
+  color: var(--accent-primary);
+}
+
+.chart-metric.kalshi strong {
+  color: var(--accent-kalshi);
+}
+
+.chart-metric.peb strong {
+  color: var(--accent-secondary);
 }
 
 .card-caption,
@@ -1039,6 +1328,11 @@ body {
   letter-spacing: 0.06em;
 }
 
+.signal-stack {
+  display: grid;
+  gap: 1rem;
+}
+
 .signal-value {
   margin: 0.4rem 0 0.35rem;
   font-size: 3rem;
@@ -1062,6 +1356,23 @@ body {
 .detail-meta-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   margin: 1rem 0 1.1rem;
+}
+
+.playbook-list {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.playbook-row {
+  padding: 0.85rem 0.95rem;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.playbook-row span {
+  color: var(--text-dim);
+  font-size: 0.82rem;
 }
 
 .meta-stat {
@@ -1091,6 +1402,7 @@ body {
 .poll-list,
 .reasoning-list,
 .timeline-list {
+  display: grid;
   gap: 0.75rem;
 }
 
@@ -1101,6 +1413,38 @@ body {
   gap: 0.9rem;
   padding: 0.95rem 1rem;
   border-radius: 16px;
+}
+
+.duel-strip {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 0.9rem;
+}
+
+.duel-card {
+  padding: 0.9rem;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.duel-card.leader {
+  border-color: rgba(0, 255, 157, 0.2);
+  background: linear-gradient(180deg, rgba(0, 255, 157, 0.08), rgba(255, 255, 255, 0.025));
+}
+
+.duel-card.runner {
+  border-color: rgba(57, 208, 255, 0.16);
+}
+
+.duel-card-head span {
+  color: var(--text-dim);
+  font-size: 0.78rem;
+}
+
+.duel-card-head strong {
+  font-size: 1.1rem;
 }
 
 .candidate-row.leader {
@@ -1276,6 +1620,8 @@ body {
 }
 
 @media (max-width: 1300px) {
+  .command-grid,
+  .workspace-lower-grid,
   .workspace-grid,
   .intel-hub {
     grid-template-columns: 1fr;
@@ -1311,11 +1657,20 @@ body {
     flex-direction: column;
     align-items: stretch;
   }
+
+  .candidate-cluster,
+  .chart-metric-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 820px) {
   .stats-grid,
-  .detail-meta-grid {
+  .detail-meta-grid,
+  .candidate-cluster,
+  .chart-metric-row,
+  .hero-metric-grid,
+  .duel-strip {
     grid-template-columns: 1fr;
   }
 
@@ -1330,7 +1685,8 @@ body {
   .detail-actions,
   .header-top,
   .header-side,
-  .data-viz {
+  .data-viz,
+  .command-head {
     flex-direction: column;
   }
 
@@ -1339,8 +1695,12 @@ body {
     height: 1px;
   }
 
+  .detail-dialog-content {
+    width: calc(100vw - 10px) !important;
+    height: calc(100vh - 10px);
+  }
+
   .detail-workspace {
-    inset: 10px;
     padding: 1rem;
   }
 
@@ -1354,6 +1714,14 @@ body {
 
   .candidate-row {
     grid-template-columns: 1fr;
+  }
+
+  .command-grid {
+    padding: 0.9rem;
+  }
+
+  .combatant-card {
+    min-height: auto;
   }
 
   .reasoning-row,

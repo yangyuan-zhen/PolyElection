@@ -7,6 +7,16 @@ import {
   useEffect,
   useState,
 } from "react";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Separator } from "@/components/ui/separator";
 
 type CandidateBoardEntry = {
   name?: string;
@@ -365,6 +375,47 @@ function buildInsightText(event: Opportunity, detail: QuantDetail): string {
     ? `当前由“${leader.name}”领跑，领先第二名“${runnerUp.name}” ${detail.candidateInsights.leaderGap.toFixed(1)}pt。`
     : `当前主导结果为“${leader.name}”。`;
   return `PEB 融合概率与 Polymarket 实时价格之间的偏离为 ${formatSignedPercent(spread)}，${direction}。${leaderLine}Kalshi 对冲价位于 ${formatPercent(detail.kalshiProb)}，与主市场形成 ${formatSignedPercent(detail.kalshiProb - toNumber(event.market_price))} 的跨所价差。当前建议为“${detail.recommendation.action}”，优先关注 ${detail.catalysts[0]?.title || "后续关键事件"} 对价格的二次冲击。`;
+}
+
+function getSignalState(spread: number) {
+  const absSpread = Math.abs(spread);
+  if (absSpread >= 8) {
+    return {
+      label: spread >= 0 ? "高置信 Alpha" : "反向风险",
+      tone: "critical",
+      summary:
+        spread >= 0
+          ? "模型显著高于盘口，市场可能尚未完成重定价。"
+          : "盘口显著高于模型，交易盘可能已经过热。",
+    };
+  }
+  if (absSpread >= 5) {
+    return {
+      label: spread >= 0 ? "可执行价差" : "回撤预警",
+      tone: "active",
+      summary:
+        spread >= 0
+          ? "存在可追踪的价差窗口，适合等待二次确认后执行。"
+          : "市场领先模型较多，优先防守并观察收敛速度。",
+    };
+  }
+  return {
+    label: "定价接近公允",
+    tone: "calm",
+    summary: "三方概率相互靠近，当前更适合跟踪事件而不是强行交易。",
+  };
+}
+
+function buildWatchItems(event: Opportunity, detail: QuantDetail): string[] {
+  const leader = detail.candidateInsights.leader;
+  const runnerUp = detail.candidateInsights.runnerUp;
+  return [
+    `主导候选人 ${leader.name} 当前盘口 ${formatPercent(leader.probability)}`,
+    runnerUp
+      ? `${runnerUp.name} 与领跑者仍有 ${detail.candidateInsights.leaderGap.toFixed(1)}pt 差距`
+      : `当前市场主导结果为 ${safeOutcome(event)}`,
+    `${detail.catalysts[0]?.title || "下一次关键事件"} 将决定价差是否继续放大`,
+  ];
 }
 
 function buildRecommendation(spread: number, daysLeft: number) {
@@ -757,6 +808,11 @@ export default function DashboardClient() {
     });
 
   const detail = selectedOpportunity ? buildQuantDetail(selectedOpportunity) : null;
+  const detailCandidates = detail?.candidateInsights.candidates ?? [];
+  const heroCandidates = detailCandidates.slice(0, 3);
+  const duelCandidates = detailCandidates.slice(0, 2);
+  const signalState = detail ? getSignalState(toNumber(selectedOpportunity?.divergence)) : null;
+  const watchItems = selectedOpportunity && detail ? buildWatchItems(selectedOpportunity, detail) : [];
 
   return (
     <>
@@ -1000,58 +1056,146 @@ export default function DashboardClient() {
       </main>
 
       {selectedOpportunity && detail ? (
-        <div className="detail-modal" aria-hidden="false">
-          <div className="detail-backdrop" onClick={() => setSelectedOpportunity(null)}></div>
-          <section className="detail-workspace" role="dialog" aria-modal="true" aria-labelledby="detailTitle">
+        <Dialog
+          open={Boolean(selectedOpportunity)}
+          onOpenChange={(open) => {
+            if (!open) {
+              setSelectedOpportunity(null);
+            }
+          }}
+        >
+          <DialogContent className="detail-dialog-content" showCloseButton={false}>
+            <DialogTitle className="sr-only">{safeTitle(selectedOpportunity)}</DialogTitle>
+            <DialogDescription className="sr-only">
+              {buildSubtitle(selectedOpportunity, detail)}
+            </DialogDescription>
+            <ScrollArea className="detail-scroll-area">
+              <section className="detail-workspace">
             <header className="workspace-header">
               <div className="workspace-headline">
                 <div className="detail-kicker">MARKET WAR ROOM</div>
                 <h2 className="workspace-title" id="detailTitle">{safeTitle(selectedOpportunity)}</h2>
                 <p className="workspace-subtitle">{buildSubtitle(selectedOpportunity, detail)}</p>
+                <div className="market-badge-row">
+                  {[
+                    detail.candidateInsights.structureLabel,
+                    `领跑 ${detail.candidateInsights.leader.name}`,
+                    `领先差 ${detail.candidateInsights.leaderGap.toFixed(1)}pt`,
+                    detail.candidateInsights.fieldLabel,
+                    `结算 ${selectedOpportunity.time_label_zh || selectedOpportunity.time_label || "实时"}`,
+                  ].map((badge) => (
+                    <Badge className="market-badge" key={badge} variant="outline">{badge}</Badge>
+                  ))}
+                </div>
               </div>
               <div className="workspace-actions">
-                {["dashboard_customize", "notifications", "translate"].map((icon) => (
-                  <button key={icon} className="icon-button" type="button">
+                {[
+                  ["dashboard_customize", "切换面板密度"],
+                  ["notifications", "关注预警"],
+                  ["translate", "切换语言"],
+                ].map(([icon, label]) => (
+                  <Button key={icon} className="icon-button" type="button" variant="outline" size="icon" aria-label={label}>
                     <span className="material-icons-round">{icon}</span>
-                  </button>
+                  </Button>
                 ))}
-                <a className="icon-button link-button" href={selectedOpportunity.url || "#"} target="_blank" rel="noreferrer">
+                <Button
+                  className="icon-button link-button"
+                  aria-label="在 Polymarket 中打开"
+                  render={<a href={selectedOpportunity.url || "#"} target="_blank" rel="noreferrer" />}
+                  variant="outline"
+                  size="icon"
+                >
                   <span className="material-icons-round">open_in_new</span>
-                </a>
-                <button className="icon-button close-button" type="button" onClick={() => setSelectedOpportunity(null)}>
+                </Button>
+                <Button
+                  className="icon-button close-button"
+                  type="button"
+                  aria-label="关闭详情看板"
+                  variant="outline"
+                  size="icon"
+                  onClick={() => setSelectedOpportunity(null)}
+                >
                   <span className="material-icons-round">close</span>
-                </button>
+                </Button>
               </div>
             </header>
 
-            <section className="workspace-ribbon">
-              <div className="market-badge-row">
-                {[
-                  detail.candidateInsights.structureLabel,
-                  `领跑 ${detail.candidateInsights.leader.name}`,
-                  `领先差 ${detail.candidateInsights.leaderGap.toFixed(1)}pt`,
-                  detail.candidateInsights.fieldLabel,
-                  `结算 ${selectedOpportunity.time_label_zh || selectedOpportunity.time_label || "实时"}`,
-                ].map((badge) => (
-                  <span className="market-badge" key={badge}>{badge}</span>
-                ))}
-              </div>
-              <div className="leader-strip">
-                {detail.candidateInsights.candidates.slice(0, 3).map((candidate, index) => (
-                  <div className={`leader-card ${index === 0 ? "leader" : index === 1 ? "runner" : "field"}`} key={candidate.name}>
-                    <div className="leader-label">
-                      {index === 0 ? "领跑" : index === 1 ? `第二名 差 ${Math.abs(detail.candidateInsights.leaderGap).toFixed(1)}pt` : "追赶组"}
+            <section className="command-deck">
+              <div className="command-surface">
+                <div className="command-grid">
+                  <div className="command-main">
+                    <div className="command-head">
+                      <div>
+                        <div className="card-kicker">ELECTION COMMAND DESK</div>
+                        <h3 className="card-title">候选人战情板</h3>
+                      </div>
+                      <div className="command-head-meta">最近 30 天价格拟合 + 即时盘口</div>
                     </div>
-                    <div className="leader-persona">
-                      <CandidateAvatar candidate={candidate} small />
-                      <div className="leader-persona-copy">
-                        <div className="leader-name">{candidate.name}</div>
-                        {candidate.partyLabel ? <div className="leader-party">{candidate.partyLabel}</div> : null}
+
+                    <div className="candidate-cluster">
+                      {heroCandidates.map((candidate, index) => (
+                        <article
+                          className={`combatant-card ${index === 0 ? "primary" : index === 1 ? "secondary" : "tertiary"}`}
+                          key={`hero-${candidate.name}`}
+                        >
+                          <div className="combatant-top">
+                            <div className="combatant-tag">
+                              {index === 0 ? "领跑席位" : index === 1 ? "追击席位" : "边缘观察"}
+                            </div>
+                            <div className="combatant-delta">
+                              {index === 0
+                                ? "主导盘"
+                                : `差 ${Math.abs(candidate.probability - detail.candidateInsights.leader.probability).toFixed(1)}pt`}
+                            </div>
+                          </div>
+                          <div className="combatant-persona">
+                            <CandidateAvatar candidate={candidate} />
+                            <div className="combatant-copy">
+                              <strong>{candidate.name}</strong>
+                              {candidate.partyLabel ? <span className="candidate-party">{candidate.partyLabel}</span> : null}
+                            </div>
+                          </div>
+                          <div className="combatant-metric">{formatPercent(candidate.probability)}</div>
+                          <div className="combatant-track">
+                            <div className="combatant-fill" style={{ width: `${clamp(candidate.probability, 0, 100)}%` }}></div>
+                          </div>
+                        </article>
+                      ))}
+                    </div>
+
+                    <div className="watch-strip">
+                      {watchItems.map((item) => (
+                        <div className="watch-chip" key={item}>{item}</div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <aside className={`hero-signal-card ${signalState?.tone || "calm"}`}>
+                    <div className="card-kicker">ALPHA PANEL</div>
+                    <div className="hero-signal-label">{signalState?.label}</div>
+                    <div className="hero-signal-value">{formatSignedPercent(selectedOpportunity.divergence)}</div>
+                    <p className="hero-signal-copy">{signalState?.summary}</p>
+
+                    <div className="hero-metric-grid">
+                      <div className="hero-metric">
+                        <span>Polymarket</span>
+                        <strong>{formatPercent(detail.marketProb)}</strong>
+                      </div>
+                      <div className="hero-metric">
+                        <span>Kalshi</span>
+                        <strong>{formatPercent(detail.kalshiProb)}</strong>
+                      </div>
+                      <div className="hero-metric">
+                        <span>PEB</span>
+                        <strong>{formatPercent(detail.pebProb)}</strong>
+                      </div>
+                      <div className="hero-metric">
+                        <span>策略动作</span>
+                        <strong>{detail.recommendation.action}</strong>
                       </div>
                     </div>
-                    <div className="leader-meta">即时盘口 {formatPercent(candidate.probability)}</div>
-                  </div>
-                ))}
+                  </aside>
+                </div>
               </div>
             </section>
 
@@ -1060,10 +1204,28 @@ export default function DashboardClient() {
                 <section className="quant-card chart-card">
                   <div className="card-headline">
                     <div>
-                      <div className="card-kicker">交互式拟合走势图</div>
+                      <div className="card-kicker">HYBRID PRICE MAP</div>
                       <h3 className="card-title">市场赔率 vs 民调趋势</h3>
                     </div>
                     <div className="card-date">最近 30 天量化拟合</div>
+                  </div>
+                  <div className="chart-metric-row">
+                    <div className="chart-metric market">
+                      <span>主市场概率</span>
+                      <strong>{formatPercent(detail.marketProb)}</strong>
+                    </div>
+                    <div className="chart-metric peb">
+                      <span>PEB 概率</span>
+                      <strong>{formatPercent(detail.pebProb)}</strong>
+                    </div>
+                    <div className="chart-metric kalshi">
+                      <span>Kalshi 对冲价</span>
+                      <strong>{formatPercent(detail.kalshiProb)}</strong>
+                    </div>
+                    <div className="chart-metric spread">
+                      <span>模型偏离</span>
+                      <strong>{formatSignedPercent(detail.spread)}</strong>
+                    </div>
                   </div>
                   <HybridChart detail={detail} />
                   <div className="chart-legend">
@@ -1073,81 +1235,102 @@ export default function DashboardClient() {
                   </div>
                 </section>
 
-                <section className="quant-card wall-card">
-                  <div className="card-headline">
-                    <div>
-                      <div className="card-kicker">Probability Divergence Wall</div>
-                      <h3 className="card-title">多源概率对冲墙</h3>
-                    </div>
-                    <div className="card-caption">
-                      {Math.abs(detail.spread) >= 5 ? "套利信号已触发" : "多源概率接近"}
-                    </div>
-                  </div>
-                  <div className="probability-grid">
-                    {[
-                      { name: "Polymarket 实时价", label: safeOutcome(selectedOpportunity), probability: detail.marketProb, delta: 0, accent: "market" },
-                      { name: "Kalshi 对冲价", label: "跨所估值", probability: detail.kalshiProb, delta: detail.kalshiProb - detail.marketProb, accent: "kalshi" },
-                      { name: "PEB 融合概率", label: "民调加权", probability: detail.pebProb, delta: detail.pebProb - detail.marketProb, accent: "peb" },
-                    ].map((row) => (
-                      <div className="prob-wall-item" key={row.name}>
-                        <div className="prob-wall-name">{row.name}</div>
-                        <div className="prob-wall-label">{row.label}</div>
-                        <div className="prob-wall-bar">
-                          <div className={`prob-wall-fill ${row.accent}`} style={{ width: `${clamp(row.probability, 0, 100)}%` }}></div>
-                        </div>
-                        <div className="prob-wall-value">{formatPercent(row.probability)}</div>
-                        <div className={`prob-wall-delta${Math.abs(row.delta) >= 5 ? " hot" : ""}`}>{row.delta === 0 ? "基准" : formatSignedPercent(row.delta)}</div>
+                <div className="workspace-lower-grid">
+                  <section className="quant-card roster-card">
+                    <div className="card-headline">
+                      <div>
+                        <div className="card-kicker">CONTENDER BOARD</div>
+                        <h3 className="card-title">候选人 / 党派盘口</h3>
                       </div>
-                    ))}
-                  </div>
-                </section>
-
-                <section className="quant-card roster-card">
-                  <div className="card-headline">
-                    <div>
-                      <div className="card-kicker">Contender Board</div>
-                      <h3 className="card-title">候选人 / 党派盘口</h3>
-                    </div>
-                    <div className="card-caption">
-                      共 {detail.candidateInsights.candidates.length} 个参选项，当前领跑 {detail.candidateInsights.leader.name} {formatPercent(detail.candidateInsights.leader.probability)}
-                    </div>
-                  </div>
-                  <div className="candidate-board">
-                    {detail.candidateInsights.candidates.length === 0 ? (
-                      <div className="empty-state">
-                        <strong>候选人列表尚未同步</strong>
-                        <p>这个市场应当存在多名候选人，但当前前端拿到的还是旧缓存。重启后端并刷新前端后会显示完整盘口。</p>
+                      <div className="card-caption">
+                        共 {detail.candidateInsights.candidates.length} 个参选项，当前领跑 {detail.candidateInsights.leader.name} {formatPercent(detail.candidateInsights.leader.probability)}
                       </div>
-                    ) : (
-                      detail.candidateInsights.candidates.map((candidate, index) => (
-                        <div className={`candidate-row ${index === 0 ? "leader" : index <= 2 ? "contender" : ""}`} key={`${candidate.name}-${index}`}>
-                          <div className="candidate-rank">{String(index + 1).padStart(2, "0")}</div>
-                          <div className="candidate-body">
-                            <div className="candidate-head">
-                              <div className="candidate-persona">
-                                <CandidateAvatar candidate={candidate} />
-                                <div className="candidate-copy">
-                                  <strong>{candidate.name}</strong>
-                                  {candidate.partyLabel ? <span className="candidate-party">{candidate.partyLabel}</span> : null}
-                                </div>
-                              </div>
-                              <span>{index === 0 ? "领跑" : `距领跑差 ${Math.abs(candidate.probability - detail.candidateInsights.leader.probability).toFixed(1)}pt`}</span>
+                    </div>
+                    {duelCandidates.length > 0 ? (
+                      <div className="duel-strip">
+                        {duelCandidates.map((candidate, index) => (
+                          <div className={`duel-card ${index === 0 ? "leader" : "runner"}`} key={`duel-${candidate.name}`}>
+                            <div className="duel-card-head">
+                              <span>{index === 0 ? "当前领跑" : "主要追赶者"}</span>
+                              <strong>{formatPercent(candidate.probability)}</strong>
                             </div>
-                            <div className="candidate-track">
-                              <div className="candidate-fill" style={{ width: `${clamp(candidate.probability, 0, 100)}%` }}></div>
+                            <div className="duel-card-persona">
+                              <CandidateAvatar candidate={candidate} small />
+                              <div className="duel-card-copy">
+                                <b>{candidate.name}</b>
+                                {candidate.partyLabel ? <span className="candidate-party">{candidate.partyLabel}</span> : null}
+                              </div>
                             </div>
                           </div>
-                          <div className="candidate-price">{formatPercent(candidate.probability)}</div>
+                        ))}
+                      </div>
+                    ) : null}
+                    <div className="candidate-board">
+                      {detail.candidateInsights.candidates.length === 0 ? (
+                        <div className="empty-state">
+                          <strong>候选人列表尚未同步</strong>
+                          <p>这个市场应当存在多名候选人，但当前前端拿到的还是旧缓存。重启后端并刷新前端后会显示完整盘口。</p>
                         </div>
-                      ))
-                    )}
-                  </div>
-                </section>
+                      ) : (
+                        detail.candidateInsights.candidates.map((candidate, index) => (
+                          <div className={`candidate-row ${index === 0 ? "leader" : index <= 2 ? "contender" : ""}`} key={`${candidate.name}-${index}`}>
+                            <div className="candidate-rank">{String(index + 1).padStart(2, "0")}</div>
+                            <div className="candidate-body">
+                              <div className="candidate-head">
+                                <div className="candidate-persona">
+                                  <CandidateAvatar candidate={candidate} />
+                                  <div className="candidate-copy">
+                                    <strong>{candidate.name}</strong>
+                                    {candidate.partyLabel ? <span className="candidate-party">{candidate.partyLabel}</span> : null}
+                                  </div>
+                                </div>
+                                <span>{index === 0 ? "领跑" : `距领跑差 ${Math.abs(candidate.probability - detail.candidateInsights.leader.probability).toFixed(1)}pt`}</span>
+                              </div>
+                              <div className="candidate-track">
+                                <div className="candidate-fill" style={{ width: `${clamp(candidate.probability, 0, 100)}%` }}></div>
+                              </div>
+                            </div>
+                            <div className="candidate-price">{formatPercent(candidate.probability)}</div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </section>
+
+                  <section className="quant-card wall-card">
+                    <div className="card-headline">
+                      <div>
+                        <div className="card-kicker">PROBABILITY DIVERGENCE WALL</div>
+                        <h3 className="card-title">多源概率对冲墙</h3>
+                      </div>
+                      <div className="card-caption">
+                        {Math.abs(detail.spread) >= 5 ? "套利信号已触发" : "多源概率接近"}
+                      </div>
+                    </div>
+                    <div className="probability-grid">
+                      {[
+                        { name: "Polymarket 实时价", label: safeOutcome(selectedOpportunity), probability: detail.marketProb, delta: 0, accent: "market" },
+                        { name: "Kalshi 对冲价", label: "跨所估值", probability: detail.kalshiProb, delta: detail.kalshiProb - detail.marketProb, accent: "kalshi" },
+                        { name: "PEB 融合概率", label: "民调加权", probability: detail.pebProb, delta: detail.pebProb - detail.marketProb, accent: "peb" },
+                      ].map((row) => (
+                        <div className="prob-wall-item" key={row.name}>
+                          <div className="prob-wall-name">{row.name}</div>
+                          <div className="prob-wall-label">{row.label}</div>
+                          <div className="prob-wall-bar">
+                            <div className={`prob-wall-fill ${row.accent}`} style={{ width: `${clamp(row.probability, 0, 100)}%` }}></div>
+                          </div>
+                          <div className="prob-wall-value">{formatPercent(row.probability)}</div>
+                          <div className={`prob-wall-delta${Math.abs(row.delta) >= 5 ? " hot" : ""}`}>{row.delta === 0 ? "基准" : formatSignedPercent(row.delta)}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                </div>
 
                 <section className="quant-card poll-card">
                   <div className="card-headline">
                     <div>
-                      <div className="card-kicker">Pollster Breakdown</div>
+                      <div className="card-kicker">POLLSTER BREAKDOWN</div>
                       <h3 className="card-title">民调构成明细</h3>
                     </div>
                     <div className="card-caption">纳入 {detail.polls.length} 家机构，平均权重 {((detail.polls.reduce((sum, item) => sum + item.weight, 0) / detail.polls.length) * 100).toFixed(1)}%</div>
@@ -1172,19 +1355,10 @@ export default function DashboardClient() {
               </div>
 
               <aside className="workspace-side">
-                <section className={`quant-card signal-card${Math.abs(toNumber(selectedOpportunity.divergence)) >= 5 ? " hot" : ""}`}>
-                  <div className="card-kicker">Divergence Signal</div>
-                  <div className="signal-label">
-                    {Math.abs(toNumber(selectedOpportunity.divergence)) >= 8 ? "强套利窗口" : Math.abs(toNumber(selectedOpportunity.divergence)) >= 5 ? "可执行 Alpha" : "中性观察"}
-                  </div>
-                  <div className="signal-value">{formatSignedPercent(selectedOpportunity.divergence)}</div>
-                  <div className="signal-caption">Polymarket {formatPercent(detail.marketProb)} vs Kalshi {formatPercent(detail.kalshiProb)} vs PEB {formatPercent(detail.pebProb)}</div>
-                </section>
-
                 <section className="quant-card ai-card">
                   <div className="card-headline compact">
                     <div>
-                      <div className="card-kicker">AI Reasoning Chain</div>
+                      <div className="card-kicker">AI REASONING CHAIN</div>
                       <h3 className="card-title">AI 选情逻辑链</h3>
                     </div>
                     <div className={`decision-pill ${detail.recommendation.tone}`}>{detail.recommendation.action}</div>
@@ -1206,10 +1380,39 @@ export default function DashboardClient() {
                   </div>
                 </section>
 
+                <section className={`quant-card signal-card signal-stack ${signalState?.tone || "calm"}${Math.abs(toNumber(selectedOpportunity.divergence)) >= 5 ? " hot" : ""}`}>
+                  <div className="card-headline compact">
+                    <div>
+                      <div className="card-kicker">TRADE PLAYBOOK</div>
+                      <h3 className="card-title">量化执行摘要</h3>
+                    </div>
+                    <Badge className={`signal-pill ${signalState?.tone || "calm"}`} variant="outline">{signalState?.label}</Badge>
+                  </div>
+                  <div className="playbook-copy">{signalState?.summary}</div>
+                  <div className="playbook-list">
+                    <div className="playbook-row">
+                      <span>主交易动作</span>
+                      <strong>{detail.recommendation.action}</strong>
+                    </div>
+                    <div className="playbook-row">
+                      <span>候选人领先差</span>
+                      <strong>{detail.candidateInsights.leaderGap.toFixed(1)}pt</strong>
+                    </div>
+                    <div className="playbook-row">
+                      <span>跨所价差</span>
+                      <strong>{formatSignedPercent(detail.kalshiProb - detail.marketProb)}</strong>
+                    </div>
+                    <div className="playbook-row">
+                      <span>重点观察</span>
+                      <strong>{detail.catalysts[0]?.time || "实时"}</strong>
+                    </div>
+                  </div>
+                </section>
+
                 <section className="quant-card meta-card">
                   <div className="card-headline compact">
                     <div>
-                      <div className="card-kicker">Election Dossier</div>
+                      <div className="card-kicker">ELECTION DOSSIER</div>
                       <h3 className="card-title">选举情况总览</h3>
                     </div>
                   </div>
@@ -1233,7 +1436,7 @@ export default function DashboardClient() {
                 <section className="quant-card catalyst-card">
                   <div className="card-headline compact">
                     <div>
-                      <div className="card-kicker">Event Catalysts</div>
+                      <div className="card-kicker">EVENT CATALYSTS</div>
                       <h3 className="card-title">关键事件冲击点</h3>
                     </div>
                   </div>
@@ -1253,14 +1456,24 @@ export default function DashboardClient() {
                   </div>
                 </section>
 
+                <Separator className="workspace-separator" />
                 <div className="detail-actions">
-                  <a className="card-link" href={selectedOpportunity.url || "#"} target="_blank" rel="noreferrer">打开 Polymarket</a>
-                  <button className="card-link secondary" type="button" onClick={() => setSelectedOpportunity(null)}>关闭看板</button>
+                  <Button
+                    className="card-link"
+                    render={<a href={selectedOpportunity.url || "#"} target="_blank" rel="noreferrer" />}
+                  >
+                    打开 Polymarket
+                  </Button>
+                  <Button className="card-link secondary" type="button" variant="outline" onClick={() => setSelectedOpportunity(null)}>
+                    关闭看板
+                  </Button>
                 </div>
               </aside>
             </div>
-          </section>
-        </div>
+              </section>
+            </ScrollArea>
+          </DialogContent>
+        </Dialog>
       ) : null}
     </>
   );
