@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+httpx
+pandas
+numpy
+jinja2
+python-dotenv
+pydantic
+aiosqlite
+groq

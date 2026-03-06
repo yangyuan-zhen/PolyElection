@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PolyElection | 全球选举量化分析看板</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Round" rel="stylesheet">
+</head>
+<body>
+    <aside class="sidebar">
+        <div class="logo">
+            <span class="material-icons-round">how_to_vote</span>
+            PolyElection
+        </div>
+
+        <nav>
+            <a href="#" class="nav-link active">
+                <span class="material-icons-round">dashboard</span>
+                数据看板
+            </a>
+            <a href="#" class="nav-link">
+                <span class="material-icons-round">public</span>
+                全球市场
+            </a>
+            <a href="#" class="nav-link">
+                <span class="material-icons-round">analytics</span>
+                PEB 算法逻辑
+            </a>
+            <a href="#" class="nav-link">
+                <span class="material-icons-round">notifications_active</span>
+                实时预警
+            </a>
+            <a href="#" class="nav-link">
+                <span class="material-icons-round">psychology</span>
+                AI 选情分析
+            </a>
+        </nav>
+
+        <div class="account-panel">
+            <div class="account-label">当前账户</div>
+            <div class="account-tier">免费版 (Free Tier)</div>
+            <div class="account-upgrade">升级至 Pro</div>
+        </div>
+    </aside>
+
+    <main class="main-content">
+        <header class="header-top">
+            <div>
+                <h1 class="page-title">选举量化情报站</h1>
+                <p class="page-subtitle">量化全球预测市场的情绪与偏离信号</p>
+            </div>
+
+            <div class="live-badge">
+                <span class="live-dot"></span>
+                <span id="syncStatusText">实时同步中 (SYNCED)</span>
+            </div>
+        </header>
+
+        <div id="errorBanner" class="error-banner hidden"></div>
+
+        <section class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-label">活跃追踪选举</div>
+                <div class="stat-value" id="activeElectionsValue">--</div>
+            </div>
+            <div class="stat-card secondary">
+                <div class="stat-label">已接入民调源</div>
+                <div class="stat-value" id="pollSourcesValue">--</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">今日套利信号 (24h)</div>
+                <div class="stat-value accent" id="signalsValue">--</div>
+            </div>
+        </section>
+
+        <div class="intel-hub">
+            <section class="opportunities-section">
+                <h2 class="section-title">全球市场机会</h2>
+                <div class="election-grid" id="opportunitiesGrid">
+                    <article class="election-card placeholder-card">
+                        <span class="card-tag">Loading</span>
+                        <h3 class="election-title">正在加载机会列表...</h3>
+                        <p class="card-description">等待从后端同步 Polymarket 和民调分析数据。</p>
+                    </article>
+                </div>
+            </section>
+
+            <section class="intelligence-section">
+                <h2 class="section-title">选情情报雷达</h2>
+                <div class="glass-card">
+                    <div id="newsFeed">
+                        <div class="news-card">
+                            <span class="news-tag">Loading</span>
+                            <div class="news-title">正在加载情报流...</div>
+                            <div class="impact-label">
+                                <span class="material-icons-round">insights</span>
+                                等待后端返回最新摘要
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="countdown-section">
+                        <h3 class="countdown-title">选举倒计时</h3>
+                        <div class="countdown-list">
+                            <div class="countdown-row">
+                                <span>2025 德国联邦大选</span>
+                                <span class="countdown-value">198天</span>
+                            </div>
+                            <div class="countdown-row">
+                                <span>2026 美国中期选举</span>
+                                <span class="countdown-value">612天</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </div>
+    </main>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
