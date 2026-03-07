@@ -1,4 +1,4 @@
-import asyncio
+﻿import asyncio
 import time
 from typing import Any, Dict
 
@@ -8,9 +8,16 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from src.analysis.dashboard_builder import build_dashboard_payload, build_dashboard_sections
-from src.analysis.kalshi_enricher import enrich_opportunities_with_kalshi
+from src.analysis.kalshi_enricher import (
+    collect_hint_event_tickers,
+    enrich_opportunities_with_kalshi,
+    merge_kalshi_events,
+)
+from src.analysis.media_enricher import enrich_opportunities_with_media
 from src.analysis.poll_enricher import enrich_opportunities_with_polls
+from src.analysis.signal_enricher import enrich_opportunities_with_signals
 from src.data_collection.kalshi_client import KalshiClient
+from src.data_collection.media_client import MediaClient
 from src.data_collection.poll_scraper import PollScraper
 from src.data_collection.polymarket_client import PolymarketClient
 from src.models.db_manager import DatabaseManager
@@ -29,6 +36,7 @@ app.add_middleware(
 
 client = PolymarketClient()
 kalshi_client = KalshiClient()
+media_client = MediaClient()
 poll_scraper = PollScraper()
 db_manager = DatabaseManager()
 
@@ -70,15 +78,26 @@ async def get_dashboard_payload(force_refresh: bool = False) -> Dict[str, Any]:
             kalshi_client.get_open_election_events(),
         )
         payload = build_dashboard_payload(events)
+
+        hinted_tickers = collect_hint_event_tickers(payload.get("opportunities") or [])
+        exact_kalshi_events = await kalshi_client.get_events_by_tickers(hinted_tickers)
+        merged_kalshi_events = merge_kalshi_events(kalshi_events, exact_kalshi_events)
+
         opportunities = enrich_opportunities_with_kalshi(
             payload.get("opportunities") or [],
-            kalshi_events,
+            merged_kalshi_events,
         )
         opportunities = await enrich_opportunities_with_polls(
             opportunities,
             scraper=poll_scraper,
             db_manager=db_manager,
         )
+        opportunities = await enrich_opportunities_with_media(
+            opportunities,
+            client=media_client,
+            db_manager=db_manager,
+        )
+        opportunities = enrich_opportunities_with_signals(opportunities)
         payload["opportunities"] = opportunities
         payload.update(build_dashboard_sections(opportunities))
         _dashboard_cache["payload"] = payload

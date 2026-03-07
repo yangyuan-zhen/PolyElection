@@ -1,3 +1,4 @@
+﻿import asyncio
 import logging
 import os
 from typing import Any, Dict, Iterable, List, Optional
@@ -90,6 +91,7 @@ class KalshiClient:
         cursor: Optional[str] = None,
         with_nested_markets: bool = True,
         status: str = "open",
+        event_ticker: Optional[str] = None,
     ) -> Dict[str, Any]:
         params: Dict[str, Any] = {
             "limit": limit,
@@ -98,8 +100,80 @@ class KalshiClient:
         }
         if cursor:
             params["cursor"] = cursor
+        if event_ticker:
+            params["event_ticker"] = event_ticker
         payload = await self._get("/events", params=params)
         return payload if isinstance(payload, dict) else {}
+
+    async def get_event(
+        self,
+        event_ticker: str,
+        *,
+        with_nested_markets: bool = True,
+    ) -> Optional[Dict[str, Any]]:
+        ticker = str(event_ticker or "").strip()
+        if not ticker:
+            return None
+
+        try:
+            payload = await self._get(
+                f"/events/{ticker}",
+                params={"with_nested_markets": str(with_nested_markets).lower()},
+            )
+            if isinstance(payload, dict):
+                if isinstance(payload.get("event"), dict):
+                    return payload["event"]
+                if payload.get("event_ticker"):
+                    return payload
+        except Exception as exc:
+            logger.debug("Kalshi direct event fetch failed for %s: %r", ticker, exc)
+
+        try:
+            payload = await self.get_events(
+                limit=1,
+                with_nested_markets=with_nested_markets,
+                status="open",
+                event_ticker=ticker,
+            )
+        except Exception as exc:
+            logger.error("Kalshi filtered event fetch failed for %s: %r", ticker, exc)
+            return None
+
+        events = payload.get("events") or []
+        for event in events:
+            if not isinstance(event, dict):
+                continue
+            if str(event.get("event_ticker") or "").upper() == ticker.upper():
+                return event
+        return None
+
+    async def get_events_by_tickers(self, event_tickers: List[str]) -> List[Dict[str, Any]]:
+        tickers: List[str] = []
+        seen = set()
+        for event_ticker in event_tickers:
+            ticker = str(event_ticker or "").strip()
+            upper = ticker.upper()
+            if not ticker or upper in seen:
+                continue
+            seen.add(upper)
+            tickers.append(ticker)
+
+        if not tickers:
+            return []
+
+        results = await asyncio.gather(
+            *[self.get_event(ticker) for ticker in tickers],
+            return_exceptions=True,
+        )
+
+        events: List[Dict[str, Any]] = []
+        for ticker, result in zip(tickers, results):
+            if isinstance(result, Exception):
+                logger.error("Kalshi hinted event fetch failed for %s: %r", ticker, result)
+                continue
+            if isinstance(result, dict):
+                events.append(result)
+        return events
 
     async def get_open_election_events(self, max_pages: int = 3) -> List[Dict[str, Any]]:
         cursor: Optional[str] = None

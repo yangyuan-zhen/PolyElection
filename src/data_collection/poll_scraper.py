@@ -1,4 +1,4 @@
-import logging
+﻿import logging
 import math
 import os
 import re
@@ -132,14 +132,16 @@ class PollScraper:
 
         page_titles: List[str] = []
         seen = set()
-        for title in self._mapped_page_titles(opportunity):
+        mapped_titles = self._mapped_page_titles(opportunity)
+        for title in mapped_titles:
             lowered = title.lower()
             if lowered in seen:
                 continue
             seen.add(lowered)
             page_titles.append(title)
 
-        for query in self._build_search_queries(opportunity):
+        queries = self._build_search_queries(opportunity)
+        for query in queries:
             try:
                 titles = await self.search_pages(query)
             except Exception as exc:
@@ -153,10 +155,13 @@ class PollScraper:
                 seen.add(lowered)
                 page_titles.append(title)
 
-        best_result: Dict[str, Any] = {}
+        best_result: Dict[str, Any] = {
+            "queries": queries,
+            "pages": page_titles[:6],
+        }
         best_count = 0
 
-        for title in page_titles[:4]:
+        for title in page_titles[:6]:
             try:
                 html = await self.get_page_html(title)
             except Exception as exc:
@@ -170,7 +175,11 @@ class PollScraper:
                 target_candidate=self._target_candidate(opportunity),
             )
             if len(result.get("polls") or []) > best_count:
-                best_result = result
+                best_result = {
+                    **result,
+                    "queries": queries,
+                    "pages": page_titles[:6],
+                }
                 best_count = len(result.get("polls") or [])
             if best_count >= 4:
                 break
@@ -188,6 +197,8 @@ class PollScraper:
     def _build_search_queries(self, opportunity: Dict[str, Any]) -> List[str]:
         title = str(opportunity.get("title") or "").strip()
         question = str(opportunity.get("market_question") or "").strip()
+        candidate = self._target_candidate(opportunity)
+        mapped_titles = self._mapped_page_titles(opportunity)
         simplified = re.sub(
             r"\b(Winner|Nominee|Next|Will|most seats|won|win)\b",
             " ",
@@ -203,6 +214,11 @@ class PollScraper:
         ]
         if question:
             queries.append(f"{question} polling")
+        if candidate and title:
+            queries.append(f'"{candidate}" "{title}" poll')
+        for mapped_title in mapped_titles:
+            queries.append(f'"{mapped_title}" polling')
+            queries.append(f'"{mapped_title}" opinion polling')
 
         deduped: List[str] = []
         seen = set()
@@ -212,9 +228,12 @@ class PollScraper:
                 continue
             seen.add(normalized)
             deduped.append(query)
-        return deduped
+        return deduped[:8]
 
     def _target_candidate(self, opportunity: Dict[str, Any]) -> str:
+        comparison_candidate = str(opportunity.get("comparison_candidate") or "").strip()
+        if comparison_candidate:
+            return comparison_candidate
         candidate_board = opportunity.get("candidate_board") or []
         if isinstance(candidate_board, list) and candidate_board:
             first = candidate_board[0] or {}
@@ -452,3 +471,6 @@ class PollScraper:
             days_ago = max((current - parsed_date).days, 0)
             recency_factor = 0.35 + 0.65 * math.exp(-days_ago / 45)
         return accuracy * (0.45 + 0.55 * sample_factor) * recency_factor
+
+
+

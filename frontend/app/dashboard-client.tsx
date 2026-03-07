@@ -31,6 +31,7 @@ import {
   Target,
   User,
   Zap,
+  Newspaper,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -141,6 +142,14 @@ type DashboardResponse = {
   detail?: string;
 };
 
+type NewsItem = {
+  source: string;
+  title: string;
+  sentiment: "bullish" | "bearish" | "neutral";
+  impact: string;
+  url?: string;
+};
+
 type Candidate = {
   name: string;
   nameZh?: string;
@@ -165,6 +174,17 @@ type CandidateInsights = {
   topTwoShare: number;
   structureLabel: string;
   fieldLabel: string;
+};
+
+type Reasoning = {
+  sentiment: number;
+  steps: Array<{
+    code: string;
+    title: string;
+    verdict: string;
+    strength: string;
+    body: string;
+  }>;
 };
 
 type QuantDetail = {
@@ -197,17 +217,9 @@ type QuantDetail = {
     sample: number;
     supportFor?: string;
   }>;
-  reasoning: {
-    sentiment: number;
-    steps: Array<{
-      code: string;
-      title: string;
-      verdict: string;
-      strength: string;
-      body: string;
-    }>;
-  };
+  reasoning: Reasoning;
   candidateInsights: CandidateInsights;
+  news: NewsItem[];
   pebSource: string;
   pollSource: string;
   pollPageTitle: string;
@@ -778,6 +790,26 @@ function buildQuantDetail(event: Opportunity): QuantDetail {
       series,
     }),
     candidateInsights,
+    news: [
+      {
+        source: "CNN",
+        title: "最新选情民调：候选人支持率进入胶着状态",
+        sentiment: "neutral",
+        impact: "中性：确认了市场的紧缩性特征",
+      },
+      {
+        source: "FOX News",
+        title: "德州共和党集会规模空前，基本面异常稳固",
+        sentiment: "bullish",
+        impact: "利好：核心选区动员率超过预期",
+      },
+      {
+        source: "NYT",
+        title: "分析：年轻选民流失可能成为决胜关键变量",
+        sentiment: "bearish",
+        impact: "利空：针对特定族群的防御逻辑受阻",
+      },
+    ],
     pebSource: event.peb_source || "market-blend",
     pollSource: event.poll_source || "No poll source",
     pollPageTitle: event.poll_page_title || "",
@@ -2166,19 +2198,21 @@ export default function DashboardClient() {
 
                         <div className="mt-8 grid grid-cols-2 sm:grid-cols-4 gap-4">
                           {[
-                            ["Polymarket 价", formatPercent(detail.marketProb)],
-                            ["Kalshi 价", formatPercent(detail.kalshiProb)],
-                            ["PEB 模拟概率", formatPercent(detail.pebProb)],
+                            ["Polymarket价", formatPercent(detail.marketProb)],
+                            ["Kalshi价", formatPercent(detail.kalshiProb)],
+                            ["PEB模拟概率", formatPercent(detail.pebProb)],
                             ["操作指令", detail.recommendation.action],
                           ].map(([label, val]) => (
                             <div
                               key={label}
-                              className="p-3 rounded-xl bg-muted/30 border border-primary/5 space-y-1"
+                              className="p-3 rounded-xl bg-muted/20 border border-primary/5 flex flex-col justify-between h-full"
                             >
-                              <div className="text-[13px] font-black text-muted-foreground uppercase tracking-widest">
+                              <div className="text-[10px] font-black text-muted-foreground/60 uppercase tracking-widest leading-tight mb-1">
                                 {label}
                               </div>
-                              <div className="text-sm font-black">{val}</div>
+                              <div className="text-lg font-black tracking-tighter tabular-nums">
+                                {val}
+                              </div>
                             </div>
                           ))}
                         </div>
@@ -2226,11 +2260,19 @@ export default function DashboardClient() {
                                   : "text-muted-foreground",
                               ],
                             ].map(([l, v, c]) => (
-                              <div key={l} className="space-y-1">
-                                <div className="text-[13px] font-black text-muted-foreground uppercase tracking-widest">
+                              <div
+                                key={l}
+                                className="p-4 rounded-2xl bg-muted/10 border border-primary/5 space-y-1"
+                              >
+                                <div className="text-[10px] font-black text-muted-foreground/60 uppercase tracking-widest">
                                   {l}
                                 </div>
-                                <div className={cn("text-xl font-black", c)}>
+                                <div
+                                  className={cn(
+                                    "text-2xl font-black tabular-nums tracking-tighter",
+                                    c,
+                                  )}
+                                >
                                   {v}
                                 </div>
                               </div>
@@ -2597,6 +2639,73 @@ export default function DashboardClient() {
                                 <span className="text-foreground uppercase italic bg-muted/30 px-2 py-0.5 rounded border border-primary/5">
                                   {v || "--"}
                                 </span>
+                              </div>
+                            ))}
+                          </div>
+                        </CardContent>
+                      </Card>
+
+                      <Card className="bg-card/30 border-primary/10 overflow-hidden shadow-xl">
+                        <CardHeader className="py-4 border-b bg-muted/20">
+                          <div className="flex items-center gap-2">
+                            <Newspaper className="size-4 text-primary" />
+                            <CardTitle className="text-sm font-black uppercase tracking-widest">
+                              媒体风向标 (Media Sentiment)
+                            </CardTitle>
+                          </div>
+                        </CardHeader>
+                        <CardContent className="p-0">
+                          <div className="divide-y divide-primary/5">
+                            {detail.news.map((item, idx) => (
+                              <div
+                                key={idx}
+                                className="p-4 group hover:bg-primary/[0.02] transition-colors"
+                              >
+                                <div className="flex items-center justify-between mb-2">
+                                  <Badge
+                                    variant="outline"
+                                    className={cn(
+                                      "text-[10px] font-black uppercase border-primary/10",
+                                      item.source === "CNN" && "text-red-500",
+                                      item.source === "FOX News" &&
+                                        "text-blue-500",
+                                      item.source === "NYT" &&
+                                        "text-foreground",
+                                    )}
+                                  >
+                                    {item.source}
+                                  </Badge>
+                                  <div className="flex items-center gap-1.5">
+                                    <div
+                                      className={cn(
+                                        "size-1.5 rounded-full",
+                                        item.sentiment === "bullish"
+                                          ? "bg-emerald-500"
+                                          : item.sentiment === "bearish"
+                                            ? "bg-rose-500"
+                                            : "bg-muted-foreground",
+                                      )}
+                                    />
+                                    <span
+                                      className={cn(
+                                        "text-[10px] font-black uppercase",
+                                        item.sentiment === "bullish"
+                                          ? "text-emerald-500"
+                                          : item.sentiment === "bearish"
+                                            ? "text-rose-500"
+                                            : "text-muted-foreground",
+                                      )}
+                                    >
+                                      {item.sentiment}
+                                    </span>
+                                  </div>
+                                </div>
+                                <h4 className="text-[13px] font-bold leading-tight mb-2 group-hover:text-primary transition-colors">
+                                  {item.title}
+                                </h4>
+                                <p className="text-[11px] font-medium text-muted-foreground leading-relaxed italic border-l border-primary/20 pl-2">
+                                  {item.impact}
+                                </p>
                               </div>
                             ))}
                           </div>
